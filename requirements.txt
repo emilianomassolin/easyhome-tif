@@ -1,0 +1,11 @@
+fastapi>=0.110
+uvicorn[standard]
+sqlalchemy>=2.0
+psycopg2-binary
+python-dotenv
+requests
+apscheduler>=3.10
+anthropic>=0.25
+beautifulsoup4
+playwright
+pytest

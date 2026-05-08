@@ -5,6 +5,7 @@ import requests
 
 from backend.database.connection import SessionLocal
 from backend.database.models import Property
+from backend.ml_integration.auth import get_auth_headers
 
 logger = logging.getLogger(__name__)
 
@@ -12,9 +13,9 @@ MELI_SEARCH_URL = "https://api.mercadolibre.com/sites/MLA/search"
 MELI_ITEMS_URL  = "https://api.mercadolibre.com/items"
 
 SEARCH_PARAMS = {
-    "q":    "inmuebles",
-    "state_id": "Mendoza",
-    "limit": 50,
+    "category": "MLA1459",
+    "state":    "AR-M",
+    "limit":    50,
 }
 
 MAX_DAILY_CALLS = 14_000
@@ -29,7 +30,7 @@ def _request(url: str, params: dict = None, retries: int = 3) -> requests.Respon
 
     for attempt in range(retries):
         try:
-            resp = requests.get(url, params=params, timeout=15)
+            resp = requests.get(url, params=params, headers=get_auth_headers(), timeout=15)
             _daily_calls += 1
 
             if resp.status_code == 429:

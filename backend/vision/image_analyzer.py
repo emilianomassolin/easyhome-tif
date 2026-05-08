@@ -49,7 +49,7 @@ def _analizar_imagen(url: str) -> dict | None:
 
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-5",
+            model="claude-haiku-4-5-20251001",
             max_tokens=400,
             messages=[{
                 "role": "user",
@@ -79,7 +79,7 @@ def analizar_imagenes(fotos_urls: list[str] | None) -> dict:
         return {c: False for c in criterios_base} | {"imagenes_analizadas": 0, "descripciones": []}
 
     resultados = []
-    for url in fotos_urls[:5]:  # máximo 5 fotos por propiedad
+    for url in fotos_urls[:3]:  # máximo 3 fotos por propiedad
         r = _analizar_imagen(url)
         if r:
             resultados.append(r)

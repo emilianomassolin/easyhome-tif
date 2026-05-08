@@ -17,6 +17,7 @@ class Property(Base):
     permalink_ml = Column(String, nullable=False)
     fotos_urls = Column(JSONB, nullable=True)
     fuente = Column(String, default="mercadolibre", nullable=False)
+    tipo_operacion = Column(String(20), nullable=True)
     activa = Column(Boolean, default=True, nullable=False)
     fecha_creacion = Column(
         DateTime(timezone=True),

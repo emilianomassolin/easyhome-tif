@@ -66,21 +66,24 @@ curl http://localhost:8000/properties/999
 ### 4. Correr los scrapers manualmente
 
 ```bash
-# Traer propiedades de MendozaProp
+# Traer propiedades de MendozaProp (usa API interna, rápido)
 python3 -c "from backend.scrapers.mendozaprop_scraper import scrape_mendozaprop; scrape_mendozaprop()"
 
-# Traer propiedades de ZonaProp (usa Playwright, tarda ~15 segundos)
+# Traer propiedades de ZonaProp (usa Playwright, tarda ~15 minutos por volumen)
 python3 -c "from backend.scrapers.zonaprop_scraper import scrape_zonaprop; scrape_zonaprop()"
 
-# Traer propiedades de MercadoLibre (requiere token configurado)
+# Traer propiedades de MercadoLibre (requiere OAuth configurado)
 python3 -c "from backend.ml_integration.fetcher import fetch_properties; fetch_properties()"
+
+# Configurar OAuth de MercadoLibre (una sola vez)
+python -m backend.ml_integration.ml_oauth_setup
 ```
 
 ### 5. Ver el estado de la base de datos
 
 ```bash
 psql -h localhost -U easyhome_user -d easyhome -c \
-  "SELECT fuente, COUNT(*) FROM properties GROUP BY fuente;"
+  "SELECT fuente, COUNT(*) as total, SUM(CASE WHEN activa THEN 1 ELSE 0 END) as activas FROM properties GROUP BY fuente;"
 ```
 
 ---
@@ -90,26 +93,31 @@ psql -h localhost -U easyhome_user -d easyhome -c \
 ### Sprint 1 — Obtención de datos
 
 **Fuente 1: MercadoLibre** (`backend/ml_integration/fetcher.py`)
-- Llama a la API oficial de MercadoLibre
+- Llama a la API oficial de MercadoLibre con OAuth 2.0 (Authorization Code flow)
 - Busca inmuebles en Mendoza con paginación automática
 - Usa multiget para obtener descripciones en bulk
 - Evita duplicados por `ml_id`
 - Maneja rate limit (429) y timeouts con backoff
+- Token de acceso se renueva automáticamente con refresh token
 
 **Fuente 2: MendozaProp** (`backend/scrapers/mendozaprop_scraper.py`)
-- Scraping con `requests` + `BeautifulSoup`
-- Parsea los cards de la home de mendozaprop.com
-- Extrae: título, precio, ubicación, fotos, permalink
+- Detectada API REST interna del sitio: `mendozaprop.com/api/properties`
+- Paginación por offset (PAGE_SIZE=50), sin necesidad de navegador
+- Trae venta y alquiler por separado (operationType 1 y 2)
+- Extrae: título, precio, descripción completa, ubicación, todas las fotos, habitaciones, baños, m², cocheras
+- Implementa mark-and-sweep para detectar propiedades dadas de baja
 
 **Fuente 3: ZonaProp** (`backend/scrapers/zonaprop_scraper.py`)
 - Scraping con `Playwright` (browser Chromium headless)
-- Necesita Playwright porque ZonaProp usa Cloudflare (bloquea requests normales)
-- Extrae los datos del objeto `__NEXT_DATA__` de Next.js
-- Fallback: parsea el HTML si no encuentra el JSON
+- Requiere Playwright porque ZonaProp usa Cloudflare Turnstile como protección anti-bot
+- No tiene API interna accesible: los datos están en el HTML renderizado
+- Crea un contexto de browser nuevo por página para evitar bloqueos
+- Implementa mark-and-sweep para detectar propiedades dadas de baja
 
 **Base de datos** (`backend/database/`)
 - PostgreSQL con SQLAlchemy ORM
 - Tabla `properties` con campo `fuente` para identificar el origen
+- Campo `activa` para saber si la propiedad sigue publicada
 - Creación automática de tablas al iniciar el servidor
 
 **Scheduler** (`backend/scheduler/jobs.py`)
@@ -145,6 +153,20 @@ psql -h localhost -U easyhome_user -d easyhome -c \
 **API REST — Sprint 2**
 - `POST /analyze/{id}` — analiza una propiedad y guarda el score
 - `POST /analyze-all` — analiza todas las pendientes de una vez
+
+---
+
+## Estrategia de actualización de propiedades (Mark and Sweep)
+
+Cada vez que se corre un scraper, el sistema sigue este proceso:
+
+1. **Mark**: todas las propiedades existentes de esa fuente se marcan como `activa = False`
+2. **Sweep**: por cada propiedad encontrada en el scrape:
+   - Si ya existe en la BD → se marca `activa = True` y se actualizan precio, fotos y descripción si cambiaron
+   - Si no existe → se crea como `activa = True`
+3. Las propiedades que no aparecieron quedan con `activa = False`, lo que indica que fueron dadas de baja en el sitio (vendidas, alquiladas o retiradas)
+
+Esto permite saber en tiempo real qué propiedades siguen disponibles sin borrar el historial.
 
 ---
 
@@ -223,8 +245,7 @@ psql -h localhost -U easyhome_user -d easyhome -c \
 | APScheduler | Actualización automática cada 24hs |
 | Claude API (claude-sonnet-4-5) | Análisis de texto e imágenes con IA |
 | Playwright + Chromium | Scraping de ZonaProp (bypasea Cloudflare) |
-| BeautifulSoup | Scraping de MendozaProp |
-| requests | Llamadas HTTP a MercadoLibre y MendozaProp |
+| requests | Llamadas HTTP a MercadoLibre y MendozaProp API |
 | python-dotenv | Variables de entorno desde `.env` |
 | Pytest | Tests de integración |
 
@@ -235,25 +256,27 @@ psql -h localhost -U easyhome_user -d easyhome -c \
 ```
 easyhome-tif/
 ├── backend/
-│   ├── main.py                        # Entry point del servidor
+│   ├── main.py                            # Entry point del servidor
 │   ├── api/
-│   │   └── routes.py                  # Todos los endpoints REST
+│   │   └── routes.py                      # Todos los endpoints REST
 │   ├── database/
-│   │   ├── models.py                  # Tabla properties (SQLAlchemy)
-│   │   └── connection.py              # Conexión a PostgreSQL
+│   │   ├── models.py                      # Tabla properties (SQLAlchemy)
+│   │   └── connection.py                  # Conexión a PostgreSQL
 │   ├── ml_integration/
-│   │   └── fetcher.py                 # Fuente: MercadoLibre
+│   │   ├── fetcher.py                     # Fuente: MercadoLibre API
+│   │   ├── auth.py                        # OAuth 2.0 con refresh token
+│   │   └── ml_oauth_setup.py              # Setup inicial del token OAuth
 │   ├── scrapers/
-│   │   ├── mendozaprop_scraper.py     # Fuente: MendozaProp (BeautifulSoup)
-│   │   └── zonaprop_scraper.py        # Fuente: ZonaProp (Playwright)
+│   │   ├── mendozaprop_scraper.py         # Fuente: MendozaProp (API interna)
+│   │   └── zonaprop_scraper.py            # Fuente: ZonaProp (Playwright)
 │   ├── scheduler/
-│   │   └── jobs.py                    # APScheduler: corre las 3 fuentes
+│   │   └── jobs.py                        # APScheduler: corre las 3 fuentes
 │   ├── nlp/
-│   │   └── analyzer.py                # NLP con Claude API
+│   │   └── analyzer.py                    # NLP con Claude API
 │   ├── vision/
-│   │   └── image_analyzer.py          # Visión con Claude API
+│   │   └── image_analyzer.py              # Visión con Claude API
 │   └── scoring/
-│       └── calculator.py              # Score de accesibilidad 1-10
+│       └── calculator.py                  # Score de accesibilidad 1-10
 ├── tests/
 │   └── test_fetcher.py
 ├── .env
@@ -268,6 +291,10 @@ easyhome-tif/
 ```env
 DATABASE_URL=postgresql://easyhome_user:1234@localhost/easyhome
 ANTHROPIC_API_KEY=sk-ant-...
+ML_APP_ID=...
+ML_CLIENT_SECRET=...
+ML_ACCESS_TOKEN=...
+ML_REFRESH_TOKEN=...
 ```
 
 ---
@@ -292,6 +319,61 @@ sudo -u postgres psql -d easyhome -c "GRANT ALL ON SCHEMA public TO easyhome_use
 
 # 4. Configurar .env con tus credenciales
 
-# 5. Iniciar el servidor
+# 5. Configurar OAuth de MercadoLibre (una sola vez)
+python -m backend.ml_integration.ml_oauth_setup
+
+# 6. Iniciar el servidor
 uvicorn backend.main:app --reload
+```
+
+---
+
+## Prompt para generar Historias de Usuario con Claude
+
+Copiá y pegá este prompt en [claude.ai](https://claude.ai) para generar las historias de usuario del proyecto:
+
+```
+Sos un analista funcional experto en metodologías ágiles. Necesito que generes las historias de usuario para un sistema llamado EasyHome.
+
+## Contexto del proyecto
+
+EasyHome es una plataforma web que ayuda a personas con movilidad reducida a encontrar viviendas accesibles en Mendoza, Argentina. El sistema:
+- Obtiene propiedades de 3 fuentes: MercadoLibre, ZonaProp y MendozaProp
+- Analiza cada propiedad con IA (Claude AI) para detectar características de accesibilidad en texto e imágenes
+- Genera un score de accesibilidad del 1 al 10
+- Expone los resultados mediante una API REST y un frontend web con filtros
+
+## Criterios de accesibilidad que detecta el sistema
+1. Rampa de acceso
+2. Ascensor / elevador
+3. Baño adaptado / barras de apoyo
+4. Entrada ancha / puerta ancha
+5. Sin escalones en acceso
+6. Piso plano / sin desniveles
+7. Estacionamiento adaptado para personas con discapacidad
+
+## Usuarios del sistema
+- Persona con movilidad reducida buscando vivienda
+- Familiar o cuidador buscando vivienda para un tercero
+- Administrador del sistema
+
+## Sprints del proyecto
+- Sprint 1: Obtención y almacenamiento de datos (scrapers + API básica)
+- Sprint 2: Análisis con IA y score de accesibilidad
+- Sprint 3: Frontend web con filtros y búsqueda
+
+## Lo que necesito
+
+Generá historias de usuario para los 3 sprints usando el formato estándar:
+
+**Como** [tipo de usuario], **quiero** [acción o funcionalidad], **para** [beneficio o resultado esperado].
+
+Cada historia debe incluir:
+- Título corto
+- Historia en formato estándar
+- Criterios de aceptación (3 a 5 puntos, en formato de lista de verificación)
+- Prioridad: Alta / Media / Baja
+- Sprint al que pertenece
+
+Generá al menos 15 historias de usuario en total, distribuidas entre los 3 sprints. Ordená por prioridad dentro de cada sprint.
 ```

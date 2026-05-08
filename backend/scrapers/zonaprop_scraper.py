@@ -1,130 +1,67 @@
-import json
 import logging
+import re
+import time
 from playwright.sync_api import sync_playwright
 from backend.database.connection import SessionLocal
 from backend.database.models import Property
 
 logger = logging.getLogger(__name__)
 
-SEARCH_URL = "https://www.zonaprop.com.ar/inmuebles-venta-mendoza.html"
+BASE_URL = "https://www.zonaprop.com.ar"
+
+OPERACIONES = ["venta", "alquiler"]
 
 
-def _parse_price(precio_str: str | None) -> float | None:
-    if not precio_str:
+def _page_url(operacion: str, numero: int) -> str:
+    if numero == 1:
+        return f"{BASE_URL}/inmuebles-{operacion}-mendoza.html"
+    return f"{BASE_URL}/inmuebles-{operacion}-mendoza-pagina-{numero}.html"
+
+
+def _parse_price(texto: str | None) -> float | None:
+    if not texto:
         return None
     try:
-        limpio = precio_str.replace("USD", "").replace("$", "").replace(".", "").replace(",", "").strip()
-        return float(limpio)
+        numeros = re.sub(r"[^\d]", "", texto)
+        return float(numeros) if numeros else None
     except Exception:
         return None
 
 
-def _scrape_with_playwright() -> list[dict]:
+def _extraer_cards(page, operacion: str) -> list[dict]:
     propiedades = []
+    items = page.query_selector_all("[data-id]")
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            locale="es-AR",
-        )
-        page = context.new_page()
-
+    for item in items:
         try:
-            page.goto(SEARCH_URL, wait_until="domcontentloaded", timeout=60000)
-            # Esperar a que Cloudflare resuelva el challenge
-            page.wait_for_timeout(8000)
-            # Si sigue en el challenge, esperar más
-            if "Just a moment" in page.title():
-                page.wait_for_timeout(10000)
+            data_id = item.get_attribute("data-id")
 
-            # ZonaProp embebe los datos en __NEXT_DATA__
-            next_data = page.evaluate("() => window.__NEXT_DATA__")
-
-            if next_data:
-                props = _extract_from_next_data(next_data)
-                propiedades.extend(props)
-            else:
-                # Fallback: parsear HTML directamente
-                propiedades.extend(_extract_from_html(page))
-
-        except Exception as e:
-            logger.error(f"Error en Playwright ZonaProp: {e}")
-        finally:
-            browser.close()
-
-    return propiedades
-
-
-def _extract_from_next_data(data: dict) -> list[dict]:
-    propiedades = []
-    try:
-        # Navegar la estructura de Next.js para encontrar los listings
-        listings = (
-            data.get("props", {})
-                .get("pageProps", {})
-                .get("initialSearch", {})
-                .get("search", {})
-                .get("postings", [])
-        )
-
-        for item in listings:
-            try:
-                permalink = "https://www.zonaprop.com.ar" + item.get("url", "")
-                fotos = [f.get("url") for f in item.get("photos", []) if f.get("url")]
-
-                propiedades.append({
-                    "ml_id":        f"zp-{item.get('id', '')}",
-                    "titulo":       item.get("title") or item.get("formattedTitle", "Sin título"),
-                    "precio":       _parse_price(str(item.get("price", {}).get("amount", ""))),
-                    "descripcion":  item.get("description"),
-                    "ubicacion":    item.get("address") or item.get("location", {}).get("name"),
-                    "permalink_ml": permalink,
-                    "fotos_urls":   fotos,
-                    "fuente":       "zonaprop",
-                })
-            except Exception as e:
-                logger.warning(f"Error parseando item ZonaProp: {e}")
+            link_el = item.query_selector("a[href*='/propiedades/']")
+            if not link_el:
                 continue
-    except Exception as e:
-        logger.error(f"Error extrayendo __NEXT_DATA__: {e}")
+            href = link_el.get_attribute("href").split("?")[0]
+            permalink = BASE_URL + href
+            titulo = link_el.inner_text().strip()[:200]
 
-    return propiedades
-
-
-def _extract_from_html(page) -> list[dict]:
-    propiedades = []
-    cards = page.query_selector_all("[data-id], .posting-card, article.posting")
-
-    for card in cards:
-        try:
-            titulo_el = card.query_selector("h2, h3, .posting-title")
-            titulo = titulo_el.inner_text().strip() if titulo_el else "Sin título"
-
-            precio_el = card.query_selector(".price-value, [class*='price']")
+            precio_el = item.query_selector("[class*='Price'], [class*='price']")
             precio = _parse_price(precio_el.inner_text()) if precio_el else None
 
-            ubicacion_el = card.query_selector(".posting-location, [class*='location']")
-            ubicacion = ubicacion_el.inner_text().strip() if ubicacion_el else "Mendoza"
+            ubic_el = item.query_selector("[class*='Location'], [class*='location'], [class*='address']")
+            ubicacion = ubic_el.inner_text().strip().split("\n")[0][:200] if ubic_el else "Mendoza"
 
-            enlace_el = card.query_selector("a[href]")
-            permalink = "https://www.zonaprop.com.ar" + enlace_el.get_attribute("href") if enlace_el else ""
-
-            foto_el = card.query_selector("img[src]")
-            fotos = [foto_el.get_attribute("src")] if foto_el else []
-
-            data_id = card.get_attribute("data-id") or permalink.split("-")[-1].replace(".html", "")
+            img_el = item.query_selector("img[src]")
+            fotos = [img_el.get_attribute("src")] if img_el else []
 
             propiedades.append({
-                "ml_id":        f"zp-{data_id}",
-                "titulo":       titulo,
-                "precio":       precio,
-                "descripcion":  None,
-                "ubicacion":    ubicacion,
-                "permalink_ml": permalink,
-                "fotos_urls":   fotos,
-                "fuente":       "zonaprop",
+                "ml_id":           f"zp-{data_id}",
+                "titulo":          titulo or "Sin título",
+                "precio":          precio,
+                "descripcion":     titulo,
+                "ubicacion":       ubicacion,
+                "permalink_ml":    permalink,
+                "fotos_urls":      fotos,
+                "fuente":          "zonaprop",
+                "tipo_operacion":  operacion,
             })
         except Exception as e:
             logger.warning(f"Error parseando card ZonaProp: {e}")
@@ -133,31 +70,108 @@ def _extract_from_html(page) -> list[dict]:
     return propiedades
 
 
-def scrape_zonaprop() -> int:
-    logger.info("Iniciando scraping de ZonaProp...")
+def _scrape_page(browser, operacion: str, numero: int) -> list[dict]:
+    """Carga una página en un contexto nuevo para evitar bloqueos de Cloudflare."""
+    ctx = browser.new_context(
+        user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        locale="es-AR",
+    )
+    try:
+        page = ctx.new_page()
+        url = _page_url(operacion, numero)
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+
+        titulo = page.title()
+        if "moment" in titulo.lower():
+            page.wait_for_timeout(12000)
+        page.wait_for_timeout(4000)
+
+        return _extraer_cards(page, operacion)
+    finally:
+        ctx.close()
+
+
+def scrape_zonaprop(max_paginas: int = 600) -> int:
+    logger.info("Iniciando scraping de ZonaProp (venta + alquiler)...")
     db = SessionLocal()
     saved = 0
 
-    try:
-        items = _scrape_with_playwright()
-        logger.info(f"Propiedades encontradas en ZonaProp: {len(items)}")
+    db.query(Property).filter_by(fuente="zonaprop").update({"activa": False})
+    db.commit()
+    logger.info("ZonaProp: propiedades existentes marcadas como inactivas.")
 
-        for item in items:
-            if not item.get("ml_id") or not item.get("permalink_ml"):
-                continue
-            if db.query(Property).filter_by(ml_id=item["ml_id"]).first():
-                continue
-            db.add(Property(**item))
-            saved += 1
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
 
-        db.commit()
+        def _restart_browser():
+            nonlocal browser
+            try:
+                browser.close()
+            except Exception:
+                pass
+            browser = p.chromium.launch(headless=True)
+            logger.info("ZonaProp: browser reiniciado.")
 
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Error en scraping de ZonaProp: {e}")
-        raise
-    finally:
-        db.close()
+        try:
+            for operacion in OPERACIONES:
+                numero = 1
+                logger.info(f"ZonaProp scrapeando: {operacion}")
 
-    logger.info(f"ZonaProp: {saved} propiedades nuevas guardadas.")
+                consecutive_errors = 0
+                total_restarts = 0
+                while True:
+                    if max_paginas and numero > max_paginas:
+                        logger.info(f"ZonaProp {operacion}: límite de {max_paginas} páginas alcanzado.")
+                        break
+
+                    try:
+                        items = _scrape_page(browser, operacion, numero)
+                        consecutive_errors = 0
+                    except Exception as e:
+                        consecutive_errors += 1
+                        logger.warning(f"ZonaProp {operacion} pág {numero}: error ({e}). Reintentando ({consecutive_errors}/3)...")
+                        time.sleep(5 * consecutive_errors)
+                        if consecutive_errors >= 3:
+                            if total_restarts >= 3:
+                                logger.error(f"ZonaProp {operacion}: demasiados reinicios. Abandonando operacion.")
+                                break
+                            logger.warning("ZonaProp: reiniciando browser...")
+                            _restart_browser()
+                            consecutive_errors = 0
+                            total_restarts += 1
+                            time.sleep(10)
+                        continue
+
+                    if not items:
+                        logger.info(f"ZonaProp {operacion} pág {numero}: sin resultados. Fin.")
+                        break
+
+                    logger.info(f"ZonaProp {operacion} pág {numero}: {len(items)} propiedades.")
+
+                    for item in items:
+                        existing = db.query(Property).filter_by(ml_id=item["ml_id"]).first()
+                        if existing:
+                            existing.activa = True
+                            existing.tipo_operacion = operacion
+                            if item.get("precio") and existing.precio != item["precio"]:
+                                existing.precio = item["precio"]
+                            if item.get("descripcion") and existing.descripcion != item["descripcion"]:
+                                existing.descripcion = item["descripcion"]
+                                existing.analizado = False
+                            saved += 1
+                        else:
+                            db.add(Property(**item))
+                            saved += 1
+
+                    db.commit()
+                    numero += 1
+
+        except Exception as e:
+            logger.error(f"Error inesperado en scraping ZonaProp: {e}")
+        finally:
+            browser.close()
+            db.close()
+
+    logger.info(f"ZonaProp: {saved} propiedades totales.")
     return saved

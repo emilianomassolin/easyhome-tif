@@ -1,106 +1,153 @@
 import logging
 import re
+import time
 import requests
-from bs4 import BeautifulSoup
 from backend.database.connection import SessionLocal
 from backend.database.models import Property
 
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.mendozaprop.com"
-
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept-Language": "es-AR,es;q=0.9",
-}
+API_URL  = f"{BASE_URL}/api/properties"
+OPERATION_TYPES = [1, 2]  # 1=alquiler, 2=venta
+PAGE_SIZE = 50
+DELAY_BETWEEN_REQUESTS = 0.3
 
 
-def _parse_price(texto: str) -> float | None:
+def _slugify(text: str) -> str:
+    text = text.lower().strip()
+    text = re.sub(r"[áàä]", "a", text)
+    text = re.sub(r"[éèë]", "e", text)
+    text = re.sub(r"[íìï]", "i", text)
+    text = re.sub(r"[óòö]", "o", text)
+    text = re.sub(r"[úùü]", "u", text)
+    text = re.sub(r"[ñ]", "n", text)
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return text.strip("-")
+
+
+def _build_permalink(item: dict) -> str:
+    tipo_op   = _slugify(item.get("transaction_type_name", "propiedad"))
+    tipo_prop = _slugify(item.get("property_type_name", ""))
+    owner     = _slugify(item.get("owner_company", ""))
+    prop_id   = item["id"]
+    slug = f"{tipo_op}-{tipo_prop}-{owner}".strip("-")
+    return f"{BASE_URL}/{slug}/{prop_id}"
+
+
+def _build_descripcion(item: dict) -> str | None:
+    partes = []
+
+    caract = []
+    if item.get("bedrooms"):
+        caract.append(f"{item['bedrooms']} habitaciones")
+    if item.get("bathrooms"):
+        caract.append(f"{item['bathrooms']} baños")
+    if item.get("parking"):
+        caract.append(f"{item['parking']} cocheras")
+    if item.get("m2_covered"):
+        caract.append(f"{item['m2_covered']} m² Cub.")
+    if item.get("m2"):
+        caract.append(f"{item['m2']} m² Tot.")
+    if caract:
+        partes.append(" - ".join(caract))
+
+    desc = (item.get("description") or "").strip()
+    if desc:
+        partes.append(desc)
+
+    return "\n\n".join(partes) if partes else None
+
+
+def _fetch_page(op_type: int, offset: int) -> list[dict]:
     try:
-        numeros = re.sub(r"[^\d]", "", texto)
-        return float(numeros) if numeros else None
-    except Exception:
-        return None
-
-
-def _scrape_page(url: str) -> list[dict]:
-    resp = requests.get(url, headers=HEADERS, timeout=15)
-    resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
-
-    propiedades = []
-    cards = soup.select("a[href*='/venta-']")
-
-    for card in cards:
-        try:
-            href = card["href"]
-            permalink = BASE_URL + href if not href.startswith("http") else href
-
-            # Texto del card separado por pipes: Tipo|Fotos|Ubicación|Título|Features|Precio|CTA
-            partes = [p.strip() for p in card.get_text(separator="|", strip=True).split("|") if p.strip()]
-
-            if len(partes) < 3:
-                continue
-
-            # El título es la parte más larga que no sea precio ni "Contactar"
-            titulo = next(
-                (p for p in partes if len(p) > 15 and "USD" not in p and "$" not in p and p != "Contactar"),
-                partes[0],
-            )
-
-            # Precio: parte que contiene USD o $ seguido de números
-            precio_txt = next((p for p in partes if "USD" in p or re.search(r"\d{3}", p) and "$" in p), None)
-            precio = _parse_price(precio_txt) if precio_txt else None
-
-            # Ubicación: segunda o tercera parte (no es el tipo de propiedad)
-            ubicacion = partes[2] if len(partes) > 2 else "Mendoza"
-
-            foto_el = card.select_one("img[src]")
-            fotos = [foto_el["src"]] if foto_el else []
-
-            slug_id = href.rstrip("/").split("/")[-1]
-
-            propiedades.append({
-                "ml_id":        f"mzprop-{slug_id}",
-                "titulo":       titulo,
-                "precio":       precio,
-                "descripcion":  None,
-                "ubicacion":    ubicacion,
-                "permalink_ml": permalink,
-                "fotos_urls":   fotos,
-                "fuente":       "mendozaprop",
-            })
-        except Exception as e:
-            logger.warning(f"Error parseando card MendozaProp: {e}")
-            continue
-
-    return propiedades
+        resp = requests.get(
+            API_URL,
+            params={"limit": PAGE_SIZE, "offset": offset, "isMap": "false", "operationType": op_type},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return resp.json() or []
+    except Exception as e:
+        logger.warning(f"Error fetching offset {offset} operationType {op_type}: {e}")
+        return []
 
 
 def scrape_mendozaprop() -> int:
-    logger.info("Iniciando scraping de MendozaProp...")
+    logger.info("Iniciando scraping de MendozaProp via API...")
     db = SessionLocal()
     saved = 0
 
     try:
-        items = _scrape_page(BASE_URL)
-        logger.info(f"Propiedades encontradas en MendozaProp: {len(items)}")
-
-        for item in items:
-            if db.query(Property).filter_by(ml_id=item["ml_id"]).first():
-                continue
-            db.add(Property(**item))
-            saved += 1
-
+        # Mark and sweep: marcar todas como inactivas antes de scrapear
+        db.query(Property).filter_by(fuente="mendozaprop").update({"activa": False})
         db.commit()
+        logger.info("MendozaProp: propiedades existentes marcadas como inactivas.")
+
+        for op_type in OPERATION_TYPES:
+            op_nombre = "alquiler" if op_type == 1 else "venta"
+            logger.info(f"Scrapeando {op_nombre} (operationType={op_type})...")
+            offset = 0
+            total_encontradas = 0
+
+            while True:
+                items = _fetch_page(op_type, offset)
+                if not items:
+                    break
+
+                for item in items:
+                    prop_id = f"mzprop-{item['id']}"
+                    existing = db.query(Property).filter_by(ml_id=prop_id).first()
+
+                    precio = float(item["price"]) if item.get("price") else None
+                    descripcion = _build_descripcion(item)
+                    fotos = item.get("images") or []
+                    ubicacion = (item.get("address") or "Mendoza").strip()
+                    titulo = (item.get("title") or item.get("property_type_name") or "Sin título").strip()
+                    permalink = _build_permalink(item)
+
+                    tipo_op = "alquiler" if op_type == 1 else "venta"
+                    if existing:
+                        existing.activa = True
+                        existing.tipo_operacion = tipo_op
+                        if existing.precio != precio:
+                            existing.precio = precio
+                        if descripcion and existing.descripcion != descripcion:
+                            existing.descripcion = descripcion
+                            existing.analizado = False
+                        if fotos and existing.fotos_urls != fotos:
+                            existing.fotos_urls = fotos
+                        saved += 1
+                    else:
+                        db.add(Property(
+                            ml_id=prop_id,
+                            titulo=titulo,
+                            precio=precio,
+                            descripcion=descripcion,
+                            ubicacion=ubicacion,
+                            permalink_ml=permalink,
+                            fotos_urls=fotos if fotos else None,
+                            fuente="mendozaprop",
+                            tipo_operacion=tipo_op,
+                            activa=True,
+                        ))
+                        saved += 1
+
+                total_encontradas += len(items)
+                db.commit()
+                offset += PAGE_SIZE
+                time.sleep(DELAY_BETWEEN_REQUESTS)
+
+                if len(items) < PAGE_SIZE:
+                    break
+
+            logger.info(f"  {op_nombre}: {total_encontradas} propiedades procesadas.")
 
     except Exception as e:
         db.rollback()
-        logger.error(f"Error en scraping de MendozaProp: {e}")
-        raise
+        logger.error(f"Error en scraping MendozaProp: {e}")
     finally:
         db.close()
 
-    logger.info(f"MendozaProp: {saved} propiedades nuevas guardadas.")
+    logger.info(f"MendozaProp: {saved} propiedades nuevas/actualizadas.")
     return saved

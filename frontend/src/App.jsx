@@ -5,6 +5,33 @@ import PropertyModal from './components/PropertyModal'
 
 const LIMIT = 20
 
+const ZONAS_MENDOZA = [
+  'Capital', 'Godoy Cruz', 'Las Heras', 'Guaymallén', 'Maipú',
+  'Luján de Cuyo', 'San Rafael', 'Rivadavia', 'Junín', 'General Alvear',
+]
+
+const TIPOS_PROPIEDAD = [
+  { value: '', label: 'Todos' },
+  { value: 'departamento', label: 'Departamento' },
+  { value: 'casa', label: 'Casa' },
+  { value: 'ph', label: 'PH' },
+  { value: 'oficina', label: 'Oficina' },
+  { value: 'local', label: 'Local comercial' },
+  { value: 'terreno', label: 'Terreno' },
+  { value: 'cochera', label: 'Cochera' },
+  { value: 'campo', label: 'Campo / Quinta' },
+]
+
+const CRITERIOS_INFO = [
+  { id: 'rampa',                   label: 'Rampa de acceso' },
+  { id: 'ascensor',                label: 'Ascensor' },
+  { id: 'bano_adaptado',           label: 'Baño adaptado' },
+  { id: 'entrada_ancha',           label: 'Entrada ancha' },
+  { id: 'sin_escalones',           label: 'Sin escalones' },
+  { id: 'piso_plano',              label: 'Piso plano' },
+  { id: 'estacionamiento_adaptado',label: 'Estacionamiento PMD' },
+]
+
 export default function App() {
   const [props, setProps]           = useState([])
   const [total, setTotal]           = useState(0)
@@ -12,15 +39,31 @@ export default function App() {
   const [loading, setLoading]       = useState(true)
   const [selectedId, setSelectedId] = useState(null)
 
-  const [fuente, setFuente]              = useState('')
-  const [minScore, setMinScore]          = useState('')
-  const [tipoOp, setTipoOp]              = useState('')
-  const [soloAnalizados, setSoloAnalizados] = useState(false)
+  const [fuente, setFuente]                   = useState('')
+  const [minScore, setMinScore]               = useState('')
+  const [tipoOp, setTipoOp]                   = useState('')
+  const [soloAnalizados, setSoloAnalizados]   = useState(false)
+  const [zona, setZona]                       = useState('')
+  const [tipoPropiedad, setTipoPropiedad]     = useState('')
+  const [criterios, setCriterios]             = useState([])
+
+  const toggleCriterio = (id) =>
+    setCriterios(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id])
+
+  const clearAll = () => {
+    setFuente(''); setMinScore(''); setTipoOp(''); setSoloAnalizados(false)
+    setZona(''); setTipoPropiedad(''); setCriterios([])
+  }
 
   const load = useCallback(async (newSkip = 0) => {
     setLoading(true)
     try {
-      const data = await getProperties({ skip: newSkip, limit: LIMIT, fuente, min_score: minScore, tipo_operacion: tipoOp, solo_analizados: soloAnalizados })
+      const data = await getProperties({
+        skip: newSkip, limit: LIMIT,
+        fuente, min_score: minScore, tipo_operacion: tipoOp,
+        solo_analizados: soloAnalizados,
+        zona, tipo_propiedad: tipoPropiedad, criterios,
+      })
       setProps(data.propiedades)
       setTotal(data.total)
       setSkip(newSkip)
@@ -29,7 +72,7 @@ export default function App() {
     } finally {
       setLoading(false)
     }
-  }, [fuente, minScore, tipoOp, soloAnalizados])
+  }, [fuente, minScore, tipoOp, soloAnalizados, zona, tipoPropiedad, criterios])
 
   useEffect(() => { load(0) }, [load])
 
@@ -54,8 +97,11 @@ export default function App() {
 
       <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
         {/* Filtros */}
-        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+        <div className="bg-white rounded-2xl border border-gray-200 p-4 space-y-4">
+
+          {/* Fila 1 */}
           <div className="flex flex-wrap gap-3 items-end">
+            {/* Operación */}
             <div className="space-y-1">
               <label className="text-xs font-medium text-gray-600">Operación</label>
               <div className="flex rounded-lg overflow-hidden border border-gray-200">
@@ -75,6 +121,36 @@ export default function App() {
               </div>
             </div>
 
+            {/* Tipo de propiedad */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-gray-600">Tipo de propiedad</label>
+              <select
+                value={tipoPropiedad}
+                onChange={e => setTipoPropiedad(e.target.value)}
+                className="block border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+              >
+                {TIPOS_PROPIEDAD.map(({ value, label }) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Zona */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-gray-600">Zona</label>
+              <input
+                list="zonas-list"
+                value={zona}
+                onChange={e => setZona(e.target.value)}
+                placeholder="Ej: Godoy Cruz"
+                className="block border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 w-40"
+              />
+              <datalist id="zonas-list">
+                {ZONAS_MENDOZA.map(z => <option key={z} value={z} />)}
+              </datalist>
+            </div>
+
+            {/* Fuente */}
             <div className="space-y-1">
               <label className="text-xs font-medium text-gray-600">Fuente</label>
               <select
@@ -89,20 +165,22 @@ export default function App() {
               </select>
             </div>
 
+            {/* Score mínimo */}
             <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-600">Score mínimo</label>
+              <label className="text-xs font-medium text-gray-600">Accesibilidad</label>
               <select
                 value={minScore}
                 onChange={e => setMinScore(e.target.value)}
                 className="block border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
               >
-                <option value="">Todos</option>
-                <option value="3">3+ Parcialmente accesible</option>
-                <option value="5">5+ Accesible</option>
-                <option value="7">7+ Muy accesible</option>
+                <option value="">Cualquiera</option>
+                <option value="3.5">Parcialmente accesible+</option>
+                <option value="6">Accesible+</option>
+                <option value="8.5">Muy accesible</option>
               </select>
             </div>
 
+            {/* Solo analizados */}
             <div className="space-y-1">
               <label className="text-xs font-medium text-gray-600">Estado</label>
               <button
@@ -119,11 +197,36 @@ export default function App() {
             </div>
 
             <button
-              onClick={() => { setFuente(''); setMinScore(''); setTipoOp(''); setSoloAnalizados(false) }}
+              onClick={clearAll}
               className="text-sm text-gray-500 hover:text-gray-700 underline self-end pb-2"
             >
               Limpiar
             </button>
+          </div>
+
+          {/* Fila 2 — Criterios de accesibilidad */}
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-gray-600">
+              Criterios de accesibilidad requeridos
+              {criterios.length > 0 && (
+                <span className="ml-2 text-indigo-600">({criterios.length} seleccionado{criterios.length > 1 ? 's' : ''})</span>
+              )}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {CRITERIOS_INFO.map(({ id, label }) => (
+                <button
+                  key={id}
+                  onClick={() => toggleCriterio(id)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                    criterios.includes(id)
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-400 hover:text-indigo-600'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 

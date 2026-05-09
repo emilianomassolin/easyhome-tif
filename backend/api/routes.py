@@ -1,8 +1,14 @@
+import base64
+import hashlib
+import os
+import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
+import requests as _req
+from dotenv import set_key
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -14,6 +20,16 @@ from backend.scoring.calculator import calcular_score
 from backend.nlp.keyword_filter import tiene_keywords_accesibilidad, RESULTADO_VACIO, VISION_VACIA
 
 router = APIRouter()
+
+_REDIRECT_URI = "https://overshot-wildcard-sublease.ngrok-free.dev/auth/callback"
+_pkce_store: dict[str, str] = {}   # state → code_verifier (in-memory, single process)
+
+
+def _pkce_pair() -> tuple[str, str]:
+    verifier = secrets.token_urlsafe(64)
+    digest = hashlib.sha256(verifier.encode()).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+    return verifier, challenge
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -109,31 +125,51 @@ def health():
     return {"status": "ok"}
 
 
+@router.get("/auth/start", response_class=RedirectResponse)
+def ml_auth_start():
+    state = secrets.token_urlsafe(16)
+    _pkce_store[state] = ""  # placeholder, PKCE not enabled
+
+    app_id = os.getenv("ML_APP_ID", "").strip()
+    url = (
+        f"https://auth.mercadolibre.com.ar/authorization"
+        f"?response_type=code"
+        f"&client_id={app_id}"
+        f"&redirect_uri={_REDIRECT_URI}"
+        f"&state={state}"
+    )
+    return RedirectResponse(url)
+
+
 @router.get("/auth/callback", response_class=HTMLResponse)
-def ml_auth_callback(request: Request, code: str = None, error: str = None):
+def ml_auth_callback(request: Request, code: str = None, error: str = None, state: str = None):
     if error or not code:
         return HTMLResponse(f"<h2>Error: {error or 'sin código'}</h2>", status_code=400)
 
-    import os, requests as req
-    from dotenv import set_key
     env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+    verifier = _pkce_store.pop(state, None) if state else None
 
-    resp = req.post("https://api.mercadolibre.com/oauth/token", data={
+    payload = {
         "grant_type":    "authorization_code",
         "client_id":     os.getenv("ML_APP_ID", "").strip(),
         "client_secret": os.getenv("ML_CLIENT_SECRET", "").strip(),
         "code":          code,
-        "redirect_uri":  "https://127.0.0.1:8000/auth/callback",
-    }, timeout=10)
+        "redirect_uri":  _REDIRECT_URI,
+    }
+    if verifier:
+        payload["code_verifier"] = verifier
+
+    resp = _req.post("https://api.mercadolibre.com/oauth/token", data=payload, timeout=10)
 
     if resp.status_code != 200:
         return HTMLResponse(f"<h2>Error al obtener token: {resp.text}</h2>", status_code=400)
 
     data = resp.json()
-    set_key(env_path, "ML_ACCESS_TOKEN",  data["access_token"])
-    set_key(env_path, "ML_REFRESH_TOKEN", data["refresh_token"])
-    os.environ["ML_ACCESS_TOKEN"]  = data["access_token"]
-    os.environ["ML_REFRESH_TOKEN"] = data["refresh_token"]
+    set_key(env_path, "ML_ACCESS_TOKEN", data["access_token"])
+    os.environ["ML_ACCESS_TOKEN"] = data["access_token"]
+    if "refresh_token" in data:
+        set_key(env_path, "ML_REFRESH_TOKEN", data["refresh_token"])
+        os.environ["ML_REFRESH_TOKEN"] = data["refresh_token"]
 
     return HTMLResponse("<h2>✅ MercadoLibre autorizado correctamente. Podés cerrar esta ventana.</h2>")
 
@@ -146,9 +182,12 @@ def list_properties(
     min_score: Optional[float] = None,
     tipo_operacion: Optional[str] = None,
     solo_analizados: Optional[bool] = None,
+    zona: Optional[str] = None,
+    tipo_propiedad: Optional[str] = None,
+    criterios: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    from sqlalchemy import nullslast, desc
+    from sqlalchemy import nullslast, desc, or_
     query = db.query(Property).filter(Property.activa == True)
     if fuente:
         query = query.filter(Property.fuente == fuente)
@@ -158,6 +197,19 @@ def list_properties(
         query = query.filter(Property.tipo_operacion == tipo_operacion)
     if solo_analizados:
         query = query.filter(Property.analizado == True)
+    if zona:
+        query = query.filter(Property.ubicacion.ilike(f"%{zona}%"))
+    if tipo_propiedad:
+        query = query.filter(Property.titulo.ilike(f"%{tipo_propiedad}%"))
+    if criterios:
+        lista = [c.strip() for c in criterios.split(",") if c.strip()]
+        for criterio in lista:
+            query = query.filter(
+                or_(
+                    Property.nlp_resultado[criterio].as_boolean() == True,
+                    Property.vision_resultado[criterio].as_boolean() == True,
+                )
+            )
     total = query.count()
     propiedades = query.order_by(nullslast(desc(Property.score_accesibilidad))).offset(skip).limit(limit).all()
     return {"total": total, "propiedades": [PropertyListItem.from_orm_with_nivel(p) for p in propiedades]}

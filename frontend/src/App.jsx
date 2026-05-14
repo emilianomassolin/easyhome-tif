@@ -25,13 +25,18 @@ const TIPOS_PROPIEDAD = [
 ]
 
 const CRITERIOS_INFO = [
-  { id: 'rampa',                   label: 'Rampa de acceso' },
-  { id: 'ascensor',                label: 'Ascensor' },
-  { id: 'bano_adaptado',           label: 'Baño adaptado' },
-  { id: 'entrada_ancha',           label: 'Entrada ancha' },
-  { id: 'sin_escalones',           label: 'Sin escalones' },
-  { id: 'piso_plano',              label: 'Piso plano' },
-  { id: 'estacionamiento_adaptado',label: 'Estacionamiento PMD' },
+  { id: 'rampa',                    label: 'Rampa de acceso' },
+  { id: 'ascensor',                 label: 'Ascensor' },
+  { id: 'bano_adaptado',            label: 'Baño adaptado' },
+  { id: 'entrada_ancha',            label: 'Entrada ancha' },
+  { id: 'sin_escalones',            label: 'Sin escalones' },
+  { id: 'piso_plano',               label: 'Piso plano' },
+  { id: 'estacionamiento_adaptado', label: 'Estacionamiento PMD' },
+  { id: 'ducha_nivel_piso',         label: 'Ducha a nivel de piso' },
+  { id: 'pasamanos',                label: 'Pasamanos / barandas' },
+  { id: 'planta_baja',              label: 'Planta baja' },
+  { id: 'piso_antideslizante',      label: 'Piso antideslizante' },
+  { id: 'pasillo_ancho',            label: 'Pasillo ancho' },
 ]
 
 export default function App() {

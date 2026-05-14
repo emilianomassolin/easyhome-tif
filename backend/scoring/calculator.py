@@ -6,11 +6,16 @@ CRITERIOS = [
     "sin_escalones",
     "piso_plano",
     "estacionamiento_adaptado",
+    "ducha_nivel_piso",
+    "pasamanos",
+    "planta_baja",
+    "piso_antideslizante",
+    "pasillo_ancho",
 ]
 
 PESO_TEXTO  = 0.6
 PESO_VISION = 0.4
-PUNTOS_POR_CRITERIO = 1.5  # 7 × 1.5 = 10.5 → normalizado a 10
+PUNTOS_POR_CRITERIO = 10 / len(CRITERIOS)  # normalizado para que el máximo siempre sea 10
 
 NIVELES = [
     (8.5, "Muy accesible"),
@@ -53,13 +58,18 @@ def calcular_score(nlp_resultado: dict, vision_resultado: dict) -> dict:
 
 def _generar_justificacion(detectados_texto: list, detectados_vision: list, score: float) -> str:
     NOMBRES = {
-        "rampa":                   "Rampa de acceso",
-        "ascensor":                "Ascensor",
-        "bano_adaptado":           "Baño adaptado",
-        "entrada_ancha":           "Entrada ancha",
-        "sin_escalones":           "Sin escalones",
-        "piso_plano":              "Piso plano",
+        "rampa":                    "Rampa de acceso",
+        "ascensor":                 "Ascensor",
+        "bano_adaptado":            "Baño adaptado",
+        "entrada_ancha":            "Entrada ancha",
+        "sin_escalones":            "Sin escalones en acceso",
+        "piso_plano":               "Piso plano",
         "estacionamiento_adaptado": "Estacionamiento adaptado",
+        "ducha_nivel_piso":         "Ducha a nivel de piso",
+        "pasamanos":                "Pasamanos / barandas",
+        "planta_baja":              "Planta baja",
+        "piso_antideslizante":      "Piso antideslizante",
+        "pasillo_ancho":            "Pasillo ancho",
     }
 
     partes = []

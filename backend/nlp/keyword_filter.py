@@ -16,20 +16,32 @@ KEYWORDS = [
     "barras de apoyo", "barra de apoyo", "ducha accesible",
     # Entrada ancha
     "puerta ancha", "puertas anchas", "entrada ancha", "acceso amplio",
-    "acceso ancho", "pasillo ancho", "pasillos anchos",
+    "acceso ancho",
     # Sin escalones
-    "planta baja", "sin escalones", "sin escalón", "sin escalera",
-    "acceso directo", "nivel del suelo", "a nivel",
+    "sin escalones", "sin escalón", "sin escalera", "acceso directo",
+    "nivel del suelo", "a nivel",
     # Piso plano
     "piso plano", "sin desnivel", "sin desniveles", "superficie plana",
     "piso nivelado",
     # Estacionamiento adaptado
     "cochera adaptada", "estacionamiento adaptado", "lugar para discapacitado",
     "pmd", "estacionamiento pmd", "cochera pmd",
+    # Ducha a nivel de piso
+    "ducha italiana", "ducha a nivel", "ducha sin bañera", "ducha sin escalon",
+    "ducha sin escalón", "ducha nivelada",
+    # Pasamanos / barandas
+    "pasamanos", "baranda", "barandal", "barandas", "baranda de seguridad",
+    # Planta baja
+    "planta baja", "piso bajo", "sin escaleras internas",
+    # Piso antideslizante
+    "piso antideslizante", "antideslizante", "piso de seguridad",
+    "superficie antideslizante",
+    # Pasillo ancho
+    "pasillo ancho", "pasillos anchos", "pasillo amplio", "corredor ancho",
     # Términos generales de accesibilidad
     "accesible", "accesibilidad", "discapacidad", "discapacitado",
     "movilidad reducida", "silla de ruedas", "silla ruedas",
-    "adulto mayor", "adultos mayores",
+    "adulto mayor", "adultos mayores", "tercera edad",
 ]
 
 
@@ -48,6 +60,11 @@ RESULTADO_VACIO = {
     "sin_escalones": False,
     "piso_plano": False,
     "estacionamiento_adaptado": False,
+    "ducha_nivel_piso": False,
+    "pasamanos": False,
+    "planta_baja": False,
+    "piso_antideslizante": False,
+    "pasillo_ancho": False,
     "confianza": 0.0,
 }
 
@@ -59,6 +76,11 @@ VISION_VACIA = {
     "sin_escalones": False,
     "piso_plano": False,
     "estacionamiento_adaptado": False,
+    "ducha_nivel_piso": False,
+    "pasamanos": False,
+    "planta_baja": False,
+    "piso_antideslizante": False,
+    "pasillo_ancho": False,
     "imagenes_analizadas": 0,
     "descripciones": [],
 }

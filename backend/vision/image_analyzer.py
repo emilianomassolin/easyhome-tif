@@ -12,8 +12,15 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
+CRITERIOS_VISION = [
+    "rampa", "ascensor", "bano_adaptado", "entrada_ancha",
+    "sin_escalones", "piso_plano", "estacionamiento_adaptado",
+    "ducha_nivel_piso", "pasamanos", "planta_baja",
+    "piso_antideslizante", "pasillo_ancho",
+]
+
 PROMPT_VISION = """Analizá esta imagen de una propiedad inmobiliaria y detectá visualmente
-características de accesibilidad para personas con movilidad reducida.
+características de accesibilidad para personas con movilidad reducida, discapacidad o adultos mayores.
 
 Respondé ÚNICAMENTE con un JSON válido con esta estructura (sin texto adicional):
 {{
@@ -24,8 +31,27 @@ Respondé ÚNICAMENTE con un JSON válido con esta estructura (sin texto adicion
   "sin_escalones": true/false,
   "piso_plano": true/false,
   "estacionamiento_adaptado": true/false,
+  "ducha_nivel_piso": true/false,
+  "pasamanos": true/false,
+  "planta_baja": true/false,
+  "piso_antideslizante": true/false,
+  "pasillo_ancho": true/false,
   "descripcion_visual": "breve descripción de lo que ves relevante para accesibilidad"
-}}"""
+}}
+
+Criterios visuales:
+- rampa: ves una rampa de acceso en la entrada
+- ascensor: ves un ascensor o cabina elevadora
+- bano_adaptado: ves barras de apoyo, asientos en la ducha o baño con adaptaciones
+- entrada_ancha: ves una puerta o entrada claramente amplia (apta para silla de ruedas)
+- sin_escalones: la entrada está al mismo nivel, sin escalones visibles
+- piso_plano: el piso es completamente plano sin desniveles
+- estacionamiento_adaptado: ves señalización PMD o espacio adaptado para discapacitados
+- ducha_nivel_piso: ves una ducha italiana, a nivel del piso, sin escalón ni bañera
+- pasamanos: ves pasamanos o barandas en escaleras, rampas o pasillos
+- planta_baja: la propiedad es claramente en planta baja o el acceso es sin escaleras
+- piso_antideslizante: el piso tiene textura antideslizante visible o cerámica rugosa
+- pasillo_ancho: los pasillos o corredores son claramente amplios"""
 
 
 def _url_a_base64(url: str) -> tuple[str, str] | None:
@@ -50,7 +76,7 @@ def _analizar_imagen(url: str) -> dict | None:
     try:
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=400,
+            max_tokens=500,
             messages=[{
                 "role": "user",
                 "content": [
@@ -71,24 +97,20 @@ def _analizar_imagen(url: str) -> dict | None:
 
 
 def analizar_imagenes(fotos_urls: list[str] | None) -> dict:
-    criterios_base = ["rampa", "ascensor", "bano_adaptado", "entrada_ancha",
-                      "sin_escalones", "piso_plano", "estacionamiento_adaptado"]
-
     if not fotos_urls:
         logger.warning("Sin fotos para analizar.")
-        return {c: False for c in criterios_base} | {"imagenes_analizadas": 0, "descripciones": []}
+        return {c: False for c in CRITERIOS_VISION} | {"imagenes_analizadas": 0, "descripciones": []}
 
     resultados = []
-    for url in fotos_urls[:3]:  # máximo 3 fotos por propiedad
+    for url in fotos_urls[:3]:
         r = _analizar_imagen(url)
         if r:
             resultados.append(r)
 
     if not resultados:
-        return {c: False for c in criterios_base} | {"imagenes_analizadas": 0, "descripciones": []}
+        return {c: False for c in CRITERIOS_VISION} | {"imagenes_analizadas": 0, "descripciones": []}
 
-    # Un criterio se considera detectado si aparece en AL MENOS una imagen
-    combinado = {c: any(r.get(c, False) for r in resultados) for c in criterios_base}
+    combinado = {c: any(r.get(c, False) for r in resultados) for c in CRITERIOS_VISION}
     combinado["imagenes_analizadas"] = len(resultados)
     combinado["descripciones"] = [r.get("descripcion_visual", "") for r in resultados if r.get("descripcion_visual")]
 

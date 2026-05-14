@@ -19,7 +19,7 @@ El sistema:
 |---|---|---|
 | Sprint 1 — Datos | ✅ Completo | Fetcher ML, scrapers ZonaProp y MendozaProp, BD, API, Scheduler |
 | Sprint 2 — IA | ✅ Completo | Análisis NLP + Visión con Claude, score de accesibilidad |
-| Sprint 3 — Frontend | ⏳ Pendiente | Interfaz web con filtros |
+| Sprint 3 — Frontend | ✅ Completo | React + Vite, filtros zona/tipo/criterios, OAuth ML con PKCE |
 
 ---
 

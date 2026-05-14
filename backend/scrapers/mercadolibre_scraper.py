@@ -70,6 +70,11 @@ def _save_items(db, items: list[dict]) -> int:
             existing.activa = True
             if item.get("precio") and existing.precio != item["precio"]:
                 existing.precio = item["precio"]
+            if item.get("descripcion") and existing.descripcion != item["descripcion"]:
+                existing.descripcion = item["descripcion"]
+                existing.analizado = False
+            if item.get("fotos_urls") and existing.fotos_urls != item["fotos_urls"]:
+                existing.fotos_urls = item["fotos_urls"]
         else:
             db.add(Property(**item))
         saved += 1

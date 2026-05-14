@@ -137,6 +137,7 @@ def ml_auth_start():
         f"&client_id={app_id}"
         f"&redirect_uri={_REDIRECT_URI}"
         f"&state={state}"
+        f"&scope=read+write+offline_access"
     )
     return RedirectResponse(url)
 

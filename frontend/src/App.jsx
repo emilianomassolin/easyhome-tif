@@ -168,6 +168,7 @@ export default function App() {
                 <option value="mercadolibre">MercadoLibre</option>
                 <option value="zonaprop">ZonaProp</option>
                 <option value="mendozaprop">MendozaProp</option>
+                <option value="argenprop">Argenprop</option>
               </select>
             </div>
 

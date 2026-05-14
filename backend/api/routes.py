@@ -263,6 +263,13 @@ def analyze_property(property_id: int, db: Session = Depends(get_db)):
     }
 
 
+@router.post("/scrape/argenprop")
+def scrape_argenprop_endpoint(db: Session = Depends(get_db)):
+    from backend.scrapers.argenprop_scraper import scrape_argenprop
+    saved = scrape_argenprop()
+    return {"mensaje": f"Argenprop: {saved} propiedades nuevas/actualizadas.", "guardadas": saved}
+
+
 @router.post("/analyze-all")
 def analyze_all(fuente: Optional[str] = None, db: Session = Depends(get_db)):
     query = db.query(Property).filter(Property.activa == True, Property.analizado == False)

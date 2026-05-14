@@ -4,6 +4,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from backend.scrapers.mercadolibre_scraper import scrape_mercadolibre
 from backend.scrapers.mendozaprop_scraper import scrape_mendozaprop
 from backend.scrapers.zonaprop_scraper import scrape_zonaprop
+from backend.scrapers.argenprop_scraper import scrape_argenprop
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ def _run_all_sources():
         ("MercadoLibre", scrape_mercadolibre),
         ("MendozaProp",  scrape_mendozaprop),
         ("ZonaProp",     scrape_zonaprop),
+        ("Argenprop",    scrape_argenprop),
     ]:
         try:
             saved = funcion()
@@ -32,7 +34,7 @@ def start_scheduler():
         func=_run_all_sources,
         trigger=IntervalTrigger(hours=24),
         id="fetch_all_sources",
-        name="Fetch MercadoLibre + MendozaProp + ZonaProp cada 24hs",
+        name="Fetch MercadoLibre + MendozaProp + ZonaProp + Argenprop cada 24hs",
         replace_existing=True,
     )
     scheduler.start()

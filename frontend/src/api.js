@@ -1,6 +1,6 @@
 const BASE = '/api'
 
-export async function getProperties({ skip = 0, limit = 20, fuente, min_score, tipo_operacion, solo_analizados, zona, tipo_propiedad, criterios } = {}) {
+export async function getProperties({ skip = 0, limit = 20, fuente, min_score, tipo_operacion, solo_analizados, zona, tipo_propiedad, criterios, orden } = {}) {
   const params = new URLSearchParams({ skip, limit })
   if (fuente) params.append('fuente', fuente)
   if (min_score !== undefined && min_score !== '') params.append('min_score', min_score)
@@ -9,6 +9,7 @@ export async function getProperties({ skip = 0, limit = 20, fuente, min_score, t
   if (zona) params.append('zona', zona)
   if (tipo_propiedad) params.append('tipo_propiedad', tipo_propiedad)
   if (criterios && criterios.length > 0) params.append('criterios', criterios.join(','))
+  if (orden) params.append('orden', orden)
   const res = await fetch(`${BASE}/properties?${params}`)
   if (!res.ok) throw new Error('Error al cargar propiedades')
   return res.json()

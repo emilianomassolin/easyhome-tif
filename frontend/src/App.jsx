@@ -8,6 +8,8 @@ const LIMIT = 20
 const ZONAS_MENDOZA = [
   'Capital', 'Godoy Cruz', 'Las Heras', 'Guaymallén', 'Maipú',
   'Luján de Cuyo', 'San Rafael', 'Rivadavia', 'Junín', 'General Alvear',
+  'San Martín', 'La Paz', 'Santa Rosa', 'Tunuyán', 'Tupungato',
+  'San Carlos', 'Malargüe', 'Lavalle',
 ]
 
 const TIPOS_PROPIEDAD = [
@@ -46,13 +48,14 @@ export default function App() {
   const [zona, setZona]                       = useState('')
   const [tipoPropiedad, setTipoPropiedad]     = useState('')
   const [criterios, setCriterios]             = useState([])
+  const [ordenScore, setOrdenScore]           = useState('desc')
 
   const toggleCriterio = (id) =>
     setCriterios(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id])
 
   const clearAll = () => {
     setFuente(''); setMinScore(''); setTipoOp(''); setSoloAnalizados(false)
-    setZona(''); setTipoPropiedad(''); setCriterios([])
+    setZona(''); setTipoPropiedad(''); setCriterios([]); setOrdenScore('desc')
   }
 
   const load = useCallback(async (newSkip = 0) => {
@@ -62,7 +65,7 @@ export default function App() {
         skip: newSkip, limit: LIMIT,
         fuente, min_score: minScore, tipo_operacion: tipoOp,
         solo_analizados: soloAnalizados,
-        zona, tipo_propiedad: tipoPropiedad, criterios,
+        zona, tipo_propiedad: tipoPropiedad, criterios, orden: ordenScore,
       })
       setProps(data.propiedades)
       setTotal(data.total)
@@ -72,7 +75,7 @@ export default function App() {
     } finally {
       setLoading(false)
     }
-  }, [fuente, minScore, tipoOp, soloAnalizados, zona, tipoPropiedad, criterios])
+  }, [fuente, minScore, tipoOp, soloAnalizados, zona, tipoPropiedad, criterios, ordenScore])
 
   useEffect(() => { load(0) }, [load])
 
@@ -138,16 +141,14 @@ export default function App() {
             {/* Zona */}
             <div className="space-y-1">
               <label className="text-xs font-medium text-gray-600">Zona</label>
-              <input
-                list="zonas-list"
+              <select
                 value={zona}
                 onChange={e => setZona(e.target.value)}
-                placeholder="Ej: Godoy Cruz"
-                className="block border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 w-40"
-              />
-              <datalist id="zonas-list">
-                {ZONAS_MENDOZA.map(z => <option key={z} value={z} />)}
-              </datalist>
+                className="block border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+              >
+                <option value="">Todos los departamentos</option>
+                {ZONAS_MENDOZA.map(z => <option key={z} value={z}>{z}</option>)}
+              </select>
             </div>
 
             {/* Fuente */}
@@ -163,6 +164,26 @@ export default function App() {
                 <option value="zonaprop">ZonaProp</option>
                 <option value="mendozaprop">MendozaProp</option>
               </select>
+            </div>
+
+            {/* Ordenar por score */}
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-gray-600">Ordenar por score</label>
+              <div className="flex rounded-lg overflow-hidden border border-gray-200">
+                {[['desc', 'Mayor a menor'], ['asc', 'Menor a mayor']].map(([val, label]) => (
+                  <button
+                    key={val}
+                    onClick={() => setOrdenScore(val)}
+                    className={`px-3 py-2 text-sm font-medium transition-colors ${
+                      ordenScore === val
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Score mínimo */}

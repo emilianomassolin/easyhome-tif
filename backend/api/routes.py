@@ -186,9 +186,10 @@ def list_properties(
     zona: Optional[str] = None,
     tipo_propiedad: Optional[str] = None,
     criterios: Optional[str] = None,
+    orden: Optional[str] = 'desc',
     db: Session = Depends(get_db),
 ):
-    from sqlalchemy import nullslast, desc, or_
+    from sqlalchemy import nullslast, nullsfirst, desc, asc, or_
     query = db.query(Property).filter(Property.activa == True)
     if fuente:
         query = query.filter(Property.fuente == fuente)
@@ -212,7 +213,12 @@ def list_properties(
                 )
             )
     total = query.count()
-    propiedades = query.order_by(nullslast(desc(Property.score_accesibilidad))).offset(skip).limit(limit).all()
+    score_order = (
+        nullsfirst(asc(Property.score_accesibilidad))
+        if orden == 'asc'
+        else nullslast(desc(Property.score_accesibilidad))
+    )
+    propiedades = query.order_by(score_order).offset(skip).limit(limit).all()
     return {"total": total, "propiedades": [PropertyListItem.from_orm_with_nivel(p) for p in propiedades]}
 
 

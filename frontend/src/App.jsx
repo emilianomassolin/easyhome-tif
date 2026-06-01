@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { getProperties, getStats } from './api'
 import PropertyCard from './components/PropertyCard'
 import PropertyModal from './components/PropertyModal'
+import AdminPanel from './pages/AdminPanel'
 
 const LIMIT = 20
 
@@ -84,6 +85,7 @@ export default function App() {
   const [skip, setSkip]             = useState(0)
   const [loading, setLoading]       = useState(true)
   const [selectedId, setSelectedId] = useState(null)
+  const [showAdmin, setShowAdmin]   = useState(false)
 
   const [fuente, setFuente]                 = useState('')
   const [minScore, setMinScore]             = useState('')
@@ -130,6 +132,10 @@ export default function App() {
   const totalPages  = Math.ceil(total / LIMIT)
   const currentPage = Math.floor(skip / LIMIT) + 1
   const hasFilters  = fuente || minScore || tipoOp || soloAnalizados || zona || tipoPropiedad || criterios.length > 0
+
+  if (showAdmin) {
+    return <AdminPanel onClose={() => setShowAdmin(false)} />
+  }
 
   return (
     <div className="min-h-screen theme-bg">
@@ -183,6 +189,15 @@ export default function App() {
                 <p className="text-[11px] mt-0.5" style={{ color: 'var(--c-text2)' }}>con accesibilidad</p>
               </div>
             </div>
+
+            <button
+              onClick={() => setShowAdmin(true)}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+              style={{ backgroundColor: 'var(--c-surface2)', color: 'var(--c-text2)', border: '1px solid var(--c-border)' }}
+              title="Panel de administración"
+            >
+              ⚙️ Admin
+            </button>
 
             <DarkToggle dark={dark} onToggle={() => setDark(d => !d)} />
           </div>

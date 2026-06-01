@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, Boolean, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime, timezone
 
@@ -39,3 +39,47 @@ class Property(Base):
     confianza_general = Column(Float, nullable=True)
     analizado = Column(Boolean, default=False, nullable=False)
     fecha_analisis = Column(DateTime(timezone=True), nullable=True)
+
+
+class ScraperLog(Base):
+    __tablename__ = "scraper_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    fuente = Column(String(50), nullable=False, index=True)
+    inicio = Column(DateTime(timezone=True), nullable=False)
+    fin = Column(DateTime(timezone=True), nullable=True)
+    estado = Column(String(20), default="running", nullable=False)  # running | ok | error
+    cantidad = Column(Integer, default=0, nullable=False)
+    mensaje_error = Column(Text, nullable=True)
+
+
+class Report(Base):
+    __tablename__ = "reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    property_id = Column(Integer, ForeignKey("properties.id"), nullable=False, index=True)
+    motivo = Column(String(100), nullable=False)
+    descripcion = Column(Text, nullable=True)
+    estado = Column(String(20), default="pendiente", nullable=False)  # pendiente | resuelto | ignorado
+    fecha_creacion = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    notas_admin = Column(Text, nullable=True)
+    fecha_resolucion = Column(DateTime(timezone=True), nullable=True)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, nullable=False, index=True)
+    nombre = Column(String, nullable=True)
+    activo = Column(Boolean, default=True, nullable=False)
+    fecha_registro = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    ultima_actividad = Column(DateTime(timezone=True), nullable=True)

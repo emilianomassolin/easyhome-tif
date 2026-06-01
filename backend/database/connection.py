@@ -21,5 +21,5 @@ def get_db():
 
 
 def init_db():
-    from backend.database.models import Property  # noqa: F401
+    from backend.database.models import Property, ScraperLog, Report, User  # noqa: F401
     Base.metadata.create_all(bind=engine)

@@ -1,6 +1,7 @@
 import logging
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from backend.database.connection import SessionLocal
 from backend.database.models import Property
@@ -73,81 +74,104 @@ def _fetch_page(op_type: int, offset: int) -> list[dict]:
         return []
 
 
-def scrape_mendozaprop() -> int:
-    logger.info("Iniciando scraping de MendozaProp via API...")
+def _scrape_op_type(op_type: int) -> tuple[int, set[str]]:
+    """Scrapes un tipo de operación con su propia sesión DB. Pensado para correr en thread."""
     db = SessionLocal()
     saved = 0
+    ids_vistos: set[str] = set()
+    op_nombre = "alquiler" if op_type == 1 else "venta"
+    tipo_op = op_nombre
 
     try:
-        # Mark and sweep: marcar todas como inactivas antes de scrapear
-        db.query(Property).filter_by(fuente="mendozaprop").update({"activa": False})
-        db.commit()
-        logger.info("MendozaProp: propiedades existentes marcadas como inactivas.")
+        logger.info(f"MendozaProp scrapeando: {op_nombre} (operationType={op_type})...")
+        offset = 0
+        total_encontradas = 0
 
-        for op_type in OPERATION_TYPES:
-            op_nombre = "alquiler" if op_type == 1 else "venta"
-            logger.info(f"Scrapeando {op_nombre} (operationType={op_type})...")
-            offset = 0
-            total_encontradas = 0
+        while True:
+            items = _fetch_page(op_type, offset)
+            if not items:
+                break
 
-            while True:
-                items = _fetch_page(op_type, offset)
-                if not items:
-                    break
+            for item in items:
+                prop_id = f"mzprop-{item['id']}"
+                existing = db.query(Property).filter_by(ml_id=prop_id).first()
 
-                for item in items:
-                    prop_id = f"mzprop-{item['id']}"
-                    existing = db.query(Property).filter_by(ml_id=prop_id).first()
+                precio = float(item["price"]) if item.get("price") else None
+                descripcion = _build_descripcion(item)
+                fotos = item.get("images") or []
+                ubicacion = (item.get("address") or "Mendoza").strip()
+                titulo = (item.get("title") or item.get("property_type_name") or "Sin título").strip()
+                permalink = _build_permalink(item)
 
-                    precio = float(item["price"]) if item.get("price") else None
-                    descripcion = _build_descripcion(item)
-                    fotos = item.get("images") or []
-                    ubicacion = (item.get("address") or "Mendoza").strip()
-                    titulo = (item.get("title") or item.get("property_type_name") or "Sin título").strip()
-                    permalink = _build_permalink(item)
+                ids_vistos.add(prop_id)
+                if existing:
+                    existing.activa = True
+                    existing.tipo_operacion = tipo_op
+                    if existing.precio != precio:
+                        existing.precio = precio
+                    if descripcion and existing.descripcion != descripcion:
+                        existing.descripcion = descripcion
+                        existing.analizado = False
+                    if fotos and existing.fotos_urls != fotos:
+                        existing.fotos_urls = fotos
+                else:
+                    db.add(Property(
+                        ml_id=prop_id,
+                        titulo=titulo,
+                        precio=precio,
+                        descripcion=descripcion,
+                        ubicacion=ubicacion,
+                        permalink_ml=permalink,
+                        fotos_urls=fotos if fotos else None,
+                        fuente="mendozaprop",
+                        tipo_operacion=tipo_op,
+                        activa=True,
+                    ))
+                saved += 1
 
-                    tipo_op = "alquiler" if op_type == 1 else "venta"
-                    if existing:
-                        existing.activa = True
-                        existing.tipo_operacion = tipo_op
-                        if existing.precio != precio:
-                            existing.precio = precio
-                        if descripcion and existing.descripcion != descripcion:
-                            existing.descripcion = descripcion
-                            existing.analizado = False
-                        if fotos and existing.fotos_urls != fotos:
-                            existing.fotos_urls = fotos
-                        saved += 1
-                    else:
-                        db.add(Property(
-                            ml_id=prop_id,
-                            titulo=titulo,
-                            precio=precio,
-                            descripcion=descripcion,
-                            ubicacion=ubicacion,
-                            permalink_ml=permalink,
-                            fotos_urls=fotos if fotos else None,
-                            fuente="mendozaprop",
-                            tipo_operacion=tipo_op,
-                            activa=True,
-                        ))
-                        saved += 1
+            total_encontradas += len(items)
+            db.commit()
+            offset += PAGE_SIZE
+            time.sleep(DELAY_BETWEEN_REQUESTS)
 
-                total_encontradas += len(items)
-                db.commit()
-                offset += PAGE_SIZE
-                time.sleep(DELAY_BETWEEN_REQUESTS)
+            if len(items) < PAGE_SIZE:
+                break
 
-                if len(items) < PAGE_SIZE:
-                    break
-
-            logger.info(f"  {op_nombre}: {total_encontradas} propiedades procesadas.")
+        logger.info(f"  MendozaProp {op_nombre}: {total_encontradas} propiedades procesadas.")
 
     except Exception as e:
         db.rollback()
-        logger.error(f"Error en scraping MendozaProp: {e}")
+        logger.error(f"Error en scraping MendozaProp [{op_nombre}]: {e}")
     finally:
         db.close()
 
-    logger.info(f"MendozaProp: {saved} propiedades nuevas/actualizadas.")
-    return saved
+    return saved, ids_vistos
+
+
+def scrape_mendozaprop() -> int:
+    logger.info("Iniciando scraping de MendozaProp (venta + alquiler en paralelo)...")
+    total_saved = 0
+    ids_vistos: set[str] = set()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = {executor.submit(_scrape_op_type, op): op for op in OPERATION_TYPES}
+        for future in as_completed(futures):
+            try:
+                saved, ids_op = future.result()
+                total_saved += saved
+                ids_vistos.update(ids_op)
+            except Exception as e:
+                logger.error(f"MendozaProp thread error: {e}")
+
+    if ids_vistos:
+        db = SessionLocal()
+        inactivadas = db.query(Property).filter(
+            Property.fuente == "mendozaprop",
+            ~Property.ml_id.in_(ids_vistos),
+        ).update({"activa": False}, synchronize_session=False)
+        db.commit()
+        db.close()
+        logger.info(f"MendozaProp: {inactivadas} propiedades no vistas marcadas como inactivas.")
+
+    logger.info(f"MendozaProp: {total_saved} propiedades nuevas/actualizadas.")
+    return total_saved

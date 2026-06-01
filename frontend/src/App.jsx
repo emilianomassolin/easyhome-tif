@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getProperties } from './api'
+import { getProperties, getStats } from './api'
 import PropertyCard from './components/PropertyCard'
 import PropertyModal from './components/PropertyModal'
 
@@ -13,49 +13,94 @@ const ZONAS_MENDOZA = [
 ]
 
 const TIPOS_PROPIEDAD = [
-  { value: '', label: 'Todos' },
+  { value: '', label: 'Todo tipo' },
   { value: 'departamento', label: 'Departamento' },
   { value: 'casa', label: 'Casa' },
   { value: 'ph', label: 'PH' },
   { value: 'oficina', label: 'Oficina' },
-  { value: 'local', label: 'Local comercial' },
+  { value: 'local', label: 'Local' },
   { value: 'terreno', label: 'Terreno' },
   { value: 'cochera', label: 'Cochera' },
-  { value: 'campo', label: 'Campo / Quinta' },
 ]
 
 const CRITERIOS_INFO = [
-  { id: 'rampa',                    label: 'Rampa de acceso' },
-  { id: 'ascensor',                 label: 'Ascensor' },
-  { id: 'bano_adaptado',            label: 'Baño adaptado' },
-  { id: 'entrada_ancha',            label: 'Entrada ancha' },
-  { id: 'sin_escalones',            label: 'Sin escalones' },
-  { id: 'piso_plano',               label: 'Piso plano' },
-  { id: 'estacionamiento_adaptado', label: 'Estacionamiento PMD' },
-  { id: 'ducha_nivel_piso',         label: 'Ducha a nivel de piso' },
-  { id: 'pasamanos',                label: 'Pasamanos / barandas' },
-  { id: 'planta_baja',              label: 'Planta baja' },
-  { id: 'piso_antideslizante',      label: 'Piso antideslizante' },
-  { id: 'pasillo_ancho',            label: 'Pasillo ancho' },
+  { id: 'rampa',                    label: '♿ Rampa'         },
+  { id: 'ascensor',                 label: '🛗 Ascensor'      },
+  { id: 'bano_adaptado',            label: '🚿 Baño adaptado' },
+  { id: 'entrada_ancha',            label: '🚪 Entrada ancha' },
+  { id: 'estacionamiento_adaptado', label: '🅿️ PMD'           },
+  { id: 'ducha_nivel_piso',         label: '🚿 Ducha italiana'},
+  { id: 'pasamanos',                label: '🪜 Pasamanos'     },
+  { id: 'planta_baja',              label: '🏠 Planta baja'   },
 ]
 
+function DarkToggle({ dark, onToggle }) {
+  return (
+    <button
+      onClick={onToggle}
+      className="flex items-center gap-2 px-3 py-1.5 rounded-full transition-colors"
+      style={{ backgroundColor: 'var(--c-surface2)', border: '1px solid var(--c-border)' }}
+      title={dark ? 'Modo claro' : 'Modo oscuro'}
+    >
+      <span className="text-sm">{dark ? '☀️' : '🌙'}</span>
+      <div
+        className="relative w-9 h-5 rounded-full transition-colors duration-300"
+        style={{ backgroundColor: dark ? 'var(--c-green)' : 'var(--c-surface3)' }}
+      >
+        <span
+          className="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-300"
+          style={{ left: dark ? '18px' : '2px' }}
+        />
+      </div>
+    </button>
+  )
+}
+
+function Segmented({ options, value, onChange }) {
+  return (
+    <div className="flex rounded-xl p-0.5 gap-0.5" style={{ backgroundColor: 'var(--c-seg)' }}>
+      {options.map(([val, label]) => (
+        <button
+          key={val}
+          onClick={() => onChange(val)}
+          className="px-3.5 py-1.5 rounded-[9px] text-xs font-semibold transition-all duration-150"
+          style={value === val
+            ? { backgroundColor: 'var(--c-seg-sel)', color: 'var(--c-text)', boxShadow: '0 1px 4px rgba(0,0,0,0.12)' }
+            : { backgroundColor: 'transparent', color: 'var(--c-seg-txt)' }
+          }
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export default function App() {
+  const [dark, setDark]             = useState(() => localStorage.getItem('eh-dark') === 'true')
   const [props, setProps]           = useState([])
   const [total, setTotal]           = useState(0)
+  const [stats, setStats]           = useState({ total: 0, con_accesibilidad: 0 })
   const [skip, setSkip]             = useState(0)
   const [loading, setLoading]       = useState(true)
   const [selectedId, setSelectedId] = useState(null)
 
-  const [fuente, setFuente]                   = useState('')
-  const [minScore, setMinScore]               = useState('')
-  const [tipoOp, setTipoOp]                   = useState('')
-  const [soloAnalizados, setSoloAnalizados]   = useState(false)
-  const [zona, setZona]                       = useState('')
-  const [tipoPropiedad, setTipoPropiedad]     = useState('')
-  const [criterios, setCriterios]             = useState([])
-  const [ordenScore, setOrdenScore]           = useState('desc')
+  const [fuente, setFuente]                 = useState('')
+  const [minScore, setMinScore]             = useState('')
+  const [tipoOp, setTipoOp]                 = useState('')
+  const [soloAnalizados, setSoloAnalizados] = useState(false)
+  const [zona, setZona]                     = useState('')
+  const [tipoPropiedad, setTipoPropiedad]   = useState('')
+  const [criterios, setCriterios]           = useState([])
+  const [ordenScore, setOrdenScore]         = useState('desc')
 
-  const toggleCriterio = (id) =>
+  // Aplicar dark mode al <html>
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', dark)
+    localStorage.setItem('eh-dark', dark)
+  }, [dark])
+
+  const toggleCriterio = id =>
     setCriterios(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id])
 
   const clearAll = () => {
@@ -75,199 +120,173 @@ export default function App() {
       setProps(data.propiedades)
       setTotal(data.total)
       setSkip(newSkip)
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setLoading(false)
-    }
+    } catch (e) { console.error(e) }
+    finally { setLoading(false) }
   }, [fuente, minScore, tipoOp, soloAnalizados, zona, tipoPropiedad, criterios, ordenScore])
 
   useEffect(() => { load(0) }, [load])
+  useEffect(() => { getStats().then(setStats).catch(() => {}) }, [])
 
   const totalPages  = Math.ceil(total / LIMIT)
   const currentPage = Math.floor(skip / LIMIT) + 1
+  const hasFilters  = fuente || minScore || tipoOp || soloAnalizados || zona || tipoPropiedad || criterios.length > 0
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">♿</span>
+    <div className="min-h-screen theme-bg">
+
+      {/* ── Header ── */}
+      <header
+        className="sticky top-0 z-40"
+        style={{
+          background: 'var(--c-header)',
+          backdropFilter: 'saturate(180%) blur(20px)',
+          WebkitBackdropFilter: 'saturate(180%) blur(20px)',
+          borderBottom: '1px solid var(--c-sep)',
+          transition: 'background 0.25s ease, border-color 0.25s ease',
+        }}
+      >
+        <div className="max-w-7xl mx-auto px-6 py-3.5 flex items-center justify-between gap-4">
+          {/* Logo */}
+          <div className="flex items-center gap-2.5 shrink-0">
+            <div className="w-8 h-8 flex items-center justify-center rounded-[10px] shadow-sm"
+              style={{ background: 'linear-gradient(145deg, #1C1C1E, #3A3A3C)' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <path d="M3 11L12 3l9 8v9a1 1 0 01-1 1H5a1 1 0 01-1-1v-9z" fill="white" fillOpacity="0.9"/>
+                <rect x="9" y="14" width="6" height="7" rx="1" fill="#1C1C1E"/>
+                <circle cx="17" cy="8" r="2.5" fill="#34C759"/>
+              </svg>
+            </div>
             <div>
-              <h1 className="text-xl font-bold text-gray-900 leading-none">EasyHome</h1>
-              <p className="text-xs text-gray-500">Viviendas accesibles en Mendoza</p>
+              <h1 className="text-[17px] font-bold leading-none tracking-tight" style={{ color: 'var(--c-text)' }}>
+                EasyHome
+              </h1>
+              <p className="text-[11px] mt-0.5" style={{ color: 'var(--c-text2)' }}>
+                Viviendas accesibles · Mendoza
+              </p>
             </div>
           </div>
-          <span className="text-sm text-gray-500">{total.toLocaleString('es-AR')} propiedades</span>
+
+          {/* Stats + toggle */}
+          <div className="flex items-center gap-4">
+            <div className="hidden sm:flex items-center gap-5">
+              <div className="text-right">
+                <p className="text-lg font-bold tabular-nums leading-none" style={{ color: 'var(--c-text)' }}>
+                  {stats.total.toLocaleString('es-AR')}
+                </p>
+                <p className="text-[11px] mt-0.5" style={{ color: 'var(--c-text2)' }}>propiedades</p>
+              </div>
+              <div style={{ width: 1, height: 28, backgroundColor: 'var(--c-border)' }} />
+              <div className="text-right">
+                <p className="text-lg font-bold tabular-nums leading-none" style={{ color: 'var(--c-green)' }}>
+                  {stats.con_accesibilidad.toLocaleString('es-AR')}
+                </p>
+                <p className="text-[11px] mt-0.5" style={{ color: 'var(--c-text2)' }}>con accesibilidad</p>
+              </div>
+            </div>
+
+            <DarkToggle dark={dark} onToggle={() => setDark(d => !d)} />
+          </div>
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
-        {/* Filtros */}
-        <div className="bg-white rounded-2xl border border-gray-200 p-4 space-y-4">
+      {/* ── Filtros ── */}
+      <div
+        className="sticky z-30"
+        style={{
+          top: 61,
+          background: 'var(--c-filter)',
+          backdropFilter: 'saturate(180%) blur(16px)',
+          WebkitBackdropFilter: 'saturate(180%) blur(16px)',
+          borderBottom: '1px solid var(--c-sep)',
+          transition: 'background 0.25s ease',
+        }}
+      >
+        <div className="max-w-7xl mx-auto px-6 py-3 space-y-2.5">
 
           {/* Fila 1 */}
-          <div className="flex flex-wrap gap-3 items-end">
-            {/* Operación */}
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-600">Operación</label>
-              <div className="flex rounded-lg overflow-hidden border border-gray-200">
-                {[['', 'Todas'], ['alquiler', 'Alquiler'], ['venta', 'Venta']].map(([val, label]) => (
-                  <button
-                    key={val}
-                    onClick={() => setTipoOp(val)}
-                    className={`px-3 py-2 text-sm font-medium transition-colors ${
-                      tipoOp === val
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-white text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <Segmented
+              options={[['', 'Todos'], ['alquiler', 'Alquiler'], ['venta', 'Venta']]}
+              value={tipoOp} onChange={setTipoOp}
+            />
 
-            {/* Tipo de propiedad */}
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-600">Tipo de propiedad</label>
-              <select
-                value={tipoPropiedad}
-                onChange={e => setTipoPropiedad(e.target.value)}
-                className="block border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
-              >
-                {TIPOS_PROPIEDAD.map(({ value, label }) => (
-                  <option key={value} value={value}>{label}</option>
-                ))}
+            {[
+              { value: tipoPropiedad, onChange: setTipoPropiedad, options: TIPOS_PROPIEDAD.map(t => [t.value, t.label]) },
+              { value: zona, onChange: setZona, options: [['', 'Todos los departamentos'], ...ZONAS_MENDOZA.map(z => [z, z])] },
+              { value: fuente, onChange: setFuente, options: [['','Todas las fuentes'],['mercadolibre','MercadoLibre'],['zonaprop','ZonaProp'],['mendozaprop','MendozaProp'],['argenprop','Argenprop']] },
+              { value: minScore, onChange: setMinScore, options: [['','Cualquier score'],['3.5','Parcialmente accesible+'],['6','Accesible+'],['8.5','Muy accesible']] },
+            ].map(({ value, onChange, options }, i) => (
+              <select key={i} value={value} onChange={e => onChange(e.target.value)} className="apple-select">
+                {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </select>
-            </div>
+            ))}
 
-            {/* Zona */}
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-600">Zona</label>
-              <select
-                value={zona}
-                onChange={e => setZona(e.target.value)}
-                className="block border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
-              >
-                <option value="">Todos los departamentos</option>
-                {ZONAS_MENDOZA.map(z => <option key={z} value={z}>{z}</option>)}
-              </select>
-            </div>
-
-            {/* Fuente */}
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-600">Fuente</label>
-              <select
-                value={fuente}
-                onChange={e => setFuente(e.target.value)}
-                className="block border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
-              >
-                <option value="">Todas</option>
-                <option value="mercadolibre">MercadoLibre</option>
-                <option value="zonaprop">ZonaProp</option>
-                <option value="mendozaprop">MendozaProp</option>
-                <option value="argenprop">Argenprop</option>
-              </select>
-            </div>
-
-            {/* Ordenar por score */}
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-600">Ordenar por score</label>
-              <div className="flex rounded-lg overflow-hidden border border-gray-200">
-                {[['desc', 'Mayor a menor'], ['asc', 'Menor a mayor']].map(([val, label]) => (
-                  <button
-                    key={val}
-                    onClick={() => setOrdenScore(val)}
-                    className={`px-3 py-2 text-sm font-medium transition-colors ${
-                      ordenScore === val
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-white text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Score mínimo */}
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-600">Accesibilidad</label>
-              <select
-                value={minScore}
-                onChange={e => setMinScore(e.target.value)}
-                className="block border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
-              >
-                <option value="">Cualquiera</option>
-                <option value="3.5">Parcialmente accesible+</option>
-                <option value="6">Accesible+</option>
-                <option value="8.5">Muy accesible</option>
-              </select>
-            </div>
-
-            {/* Solo analizados */}
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-gray-600">Estado</label>
-              <button
-                onClick={() => setSoloAnalizados(v => !v)}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
-                  soloAnalizados
-                    ? 'bg-indigo-600 text-white border-indigo-600'
-                    : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                }`}
-              >
-                <span>{soloAnalizados ? '✓' : ''}</span>
-                Solo analizados
-              </button>
-            </div>
+            <Segmented
+              options={[['desc', '↓ Score'], ['asc', '↑ Score']]}
+              value={ordenScore} onChange={setOrdenScore}
+            />
 
             <button
-              onClick={clearAll}
-              className="text-sm text-gray-500 hover:text-gray-700 underline self-end pb-2"
+              onClick={() => setSoloAnalizados(v => !v)}
+              className="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all duration-150"
+              style={soloAnalizados
+                ? { backgroundColor: 'var(--c-blue)', color: '#FFFFFF' }
+                : { backgroundColor: 'var(--c-input-bg)', color: 'var(--c-text2)', border: '1px solid var(--c-border)' }
+              }
             >
-              Limpiar
+              {soloAnalizados ? '✓ ' : ''}Analizados
             </button>
+
+            {hasFilters && (
+              <button onClick={clearAll} className="text-xs font-semibold ml-1" style={{ color: '#FF3B30' }}>
+                Limpiar
+              </button>
+            )}
           </div>
 
-          {/* Fila 2 — Criterios de accesibilidad */}
-          <div className="space-y-2">
-            <p className="text-xs font-medium text-gray-600">
-              Criterios de accesibilidad requeridos
-              {criterios.length > 0 && (
-                <span className="ml-2 text-indigo-600">({criterios.length} seleccionado{criterios.length > 1 ? 's' : ''})</span>
-              )}
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {CRITERIOS_INFO.map(({ id, label }) => (
-                <button
-                  key={id}
-                  onClick={() => toggleCriterio(id)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                    criterios.includes(id)
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-white text-gray-600 border-gray-300 hover:border-indigo-400 hover:text-indigo-600'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+          {/* Fila 2 — Criterios */}
+          <div className="flex flex-wrap gap-1.5 items-center">
+            <span className="text-[11px] font-medium mr-1" style={{ color: 'var(--c-text3)' }}>Requiere:</span>
+            {CRITERIOS_INFO.map(({ id, label }) => (
+              <button
+                key={id}
+                onClick={() => toggleCriterio(id)}
+                className="px-3 py-1 rounded-full text-xs font-semibold transition-all duration-150"
+                style={criterios.includes(id)
+                  ? { backgroundColor: 'var(--c-blue)', color: '#FFFFFF' }
+                  : { backgroundColor: 'var(--c-input-bg)', color: 'var(--c-text2)', border: '1px solid var(--c-border)' }
+                }
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
+      </div>
 
-        {/* Grid */}
+      {/* ── Contenido ── */}
+      <div className="max-w-7xl mx-auto px-6 py-6 space-y-5">
+
+        {!loading && (
+          <p className="text-[13px]" style={{ color: 'var(--c-text3)' }}>
+            <span className="font-semibold" style={{ color: 'var(--c-text2)' }}>
+              {total.toLocaleString('es-AR')}
+            </span> propiedades
+            {currentPage > 1 && ` · página ${currentPage} de ${totalPages}`}
+          </p>
+        )}
+
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="bg-white rounded-2xl border border-gray-200 h-72 animate-pulse" />
+              <div key={i} className="rounded-2xl animate-pulse" style={{ height: 280, backgroundColor: 'var(--c-surface3)' }} />
             ))}
           </div>
         ) : props.length === 0 ? (
-          <div className="text-center py-16 text-gray-400">
-            <p className="text-4xl mb-3">🏠</p>
-            <p>No se encontraron propiedades con esos filtros</p>
+          <div className="text-center py-28 space-y-3">
+            <p className="text-5xl">🏠</p>
+            <p className="text-base font-semibold" style={{ color: 'var(--c-text)' }}>Sin resultados</p>
+            <p className="text-sm" style={{ color: 'var(--c-text3)' }}>Probá ajustando los filtros</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -283,28 +302,23 @@ export default function App() {
             <button
               onClick={() => load(skip - LIMIT)}
               disabled={skip === 0 || loading}
-              className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 disabled:opacity-40 hover:bg-gray-50 transition-colors"
-            >
-              ← Anterior
-            </button>
-            <span className="text-sm text-gray-500">
-              Página {currentPage} de {totalPages}
+              className="px-5 py-2 rounded-xl text-sm font-semibold disabled:opacity-30 transition-opacity"
+              style={{ backgroundColor: 'var(--c-surface)', color: 'var(--c-blue)', border: '1px solid var(--c-border)' }}
+            >← Anterior</button>
+            <span className="text-sm font-medium tabular-nums" style={{ color: 'var(--c-text2)' }}>
+              {currentPage} / {totalPages}
             </span>
             <button
               onClick={() => load(skip + LIMIT)}
               disabled={skip + LIMIT >= total || loading}
-              className="px-4 py-2 rounded-lg border border-gray-200 text-sm text-gray-700 disabled:opacity-40 hover:bg-gray-50 transition-colors"
-            >
-              Siguiente →
-            </button>
+              className="px-5 py-2 rounded-xl text-sm font-semibold disabled:opacity-30 transition-opacity"
+              style={{ backgroundColor: 'var(--c-surface)', color: 'var(--c-blue)', border: '1px solid var(--c-border)' }}
+            >Siguiente →</button>
           </div>
         )}
       </div>
 
-      {/* Modal */}
-      {selectedId && (
-        <PropertyModal id={selectedId} onClose={() => setSelectedId(null)} />
-      )}
+      {selectedId && <PropertyModal id={selectedId} onClose={() => setSelectedId(null)} />}
     </div>
   )
 }

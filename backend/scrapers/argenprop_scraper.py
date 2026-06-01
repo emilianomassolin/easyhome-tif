@@ -2,6 +2,7 @@ import json
 import logging
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from bs4 import BeautifulSoup
@@ -224,50 +225,67 @@ def _save_cards(db, cards: list[dict], fetch_detail: bool = True) -> int:
 
 # ── Punto de entrada ───────────────────────────────────────────────────────────
 
-def scrape_argenprop() -> int:
-    logger.info("Iniciando scraping de Argenprop (Mendoza)...")
+def _scrape_operacion_argenprop(operacion: str) -> tuple[int, set[str]]:
+    """Scrapes una operación con su propia sesión DB. Pensado para correr en thread."""
     db = SessionLocal()
-    total_saved = 0
+    total_op = 0
+    ids_op: set[str] = set()
 
     try:
-        # Mark: marcar todas como inactivas
-        db.query(Property).filter_by(fuente="argenprop").update({"activa": False})
-        db.commit()
-        logger.info("Argenprop: propiedades existentes marcadas como inactivas.")
+        logger.info(f"Argenprop scrapeando: {operacion}...")
+        for pagina in range(1, MAX_PAGES + 1):
+            cards = _fetch_listing_page(operacion, pagina)
+            if not cards:
+                logger.info(f"  {operacion}: sin más resultados en página {pagina}, fin.")
+                break
 
-        for operacion in OPERACIONES:
-            logger.info(f"Scrapeando {operacion}...")
-            total_op = 0
-            ids_vistos: set[str] = set()
+            ids_pagina = {c["ml_id"] for c in cards}
+            nuevos = ids_pagina - ids_op
+            if not nuevos:
+                logger.info(f"  {operacion}: página {pagina} repite IDs, fin real del listado.")
+                break
+            ids_op.update(ids_pagina)
 
-            for pagina in range(1, MAX_PAGES + 1):
-                cards = _fetch_listing_page(operacion, pagina)
-                if not cards:
-                    logger.info(f"  {operacion}: sin más resultados en página {pagina}, fin.")
-                    break
+            saved = _save_cards(db, cards)
+            total_op += saved
+            logger.info(f"  {operacion} pág {pagina}: {saved} guardadas (total op: {total_op})")
 
-                # Argenprop cicla páginas: detectar si todos los IDs ya fueron vistos
-                ids_pagina = {c["ml_id"] for c in cards}
-                nuevos = ids_pagina - ids_vistos
-                if not nuevos:
-                    logger.info(f"  {operacion}: página {pagina} repite IDs, fin real del listado.")
-                    break
-                ids_vistos.update(ids_pagina)
+            time.sleep(DELAY)
 
-                saved = _save_cards(db, cards)
-                total_op   += saved
-                total_saved += saved
-                logger.info(f"  {operacion} pág {pagina}: {saved} guardadas (total op: {total_op})")
-
-                time.sleep(DELAY)
-
-            logger.info(f"  {operacion}: {total_op} propiedades procesadas.")
-
+        logger.info(f"  {operacion}: {total_op} propiedades procesadas.")
     except Exception as e:
         db.rollback()
-        logger.error(f"Error en scraping Argenprop: {e}", exc_info=True)
+        logger.error(f"Error en scraping Argenprop [{operacion}]: {e}", exc_info=True)
     finally:
         db.close()
+
+    return total_op, ids_op
+
+
+def scrape_argenprop() -> int:
+    logger.info("Iniciando scraping de Argenprop (venta + alquiler en paralelo)...")
+    total_saved = 0
+    ids_vistos: set[str] = set()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = {executor.submit(_scrape_operacion_argenprop, op): op for op in OPERACIONES}
+        for future in as_completed(futures):
+            try:
+                saved, ids_op = future.result()
+                total_saved += saved
+                ids_vistos.update(ids_op)
+            except Exception as e:
+                logger.error(f"Argenprop thread error: {e}")
+
+    if ids_vistos:
+        db = SessionLocal()
+        inactivadas = db.query(Property).filter(
+            Property.fuente == "argenprop",
+            ~Property.ml_id.in_(ids_vistos),
+        ).update({"activa": False}, synchronize_session=False)
+        db.commit()
+        db.close()
+        logger.info(f"Argenprop: {inactivadas} propiedades no vistas marcadas como inactivas.")
 
     logger.info(f"Argenprop finalizado: {total_saved} propiedades nuevas/actualizadas.")
     return total_saved

@@ -14,9 +14,7 @@ client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 CRITERIOS_VISION = [
     "rampa", "ascensor", "bano_adaptado", "entrada_ancha",
-    "sin_escalones", "piso_plano", "estacionamiento_adaptado",
-    "ducha_nivel_piso", "pasamanos", "planta_baja",
-    "piso_antideslizante", "pasillo_ancho",
+    "estacionamiento_adaptado", "ducha_nivel_piso", "pasamanos",
 ]
 
 PROMPT_VISION = """Analizá esta imagen de una propiedad inmobiliaria y detectá visualmente
@@ -28,14 +26,9 @@ Respondé ÚNICAMENTE con un JSON válido con esta estructura (sin texto adicion
   "ascensor": true/false,
   "bano_adaptado": true/false,
   "entrada_ancha": true/false,
-  "sin_escalones": true/false,
-  "piso_plano": true/false,
   "estacionamiento_adaptado": true/false,
   "ducha_nivel_piso": true/false,
   "pasamanos": true/false,
-  "planta_baja": true/false,
-  "piso_antideslizante": true/false,
-  "pasillo_ancho": true/false,
   "descripcion_visual": "breve descripción de lo que ves relevante para accesibilidad"
 }}
 
@@ -43,23 +36,36 @@ Criterios visuales:
 - rampa: ves una rampa de acceso en la entrada
 - ascensor: ves un ascensor o cabina elevadora
 - bano_adaptado: ves barras de apoyo, asientos en la ducha o baño con adaptaciones
-- entrada_ancha: ves una puerta o entrada claramente amplia (apta para silla de ruedas)
-- sin_escalones: la entrada está al mismo nivel, sin escalones visibles
-- piso_plano: el piso es completamente plano sin desniveles
-- estacionamiento_adaptado: ves señalización PMD o espacio adaptado para discapacitados
+- entrada_ancha: ves una puerta de acceso peatonal a la vivienda claramente amplia (apta para silla de ruedas). NO aplica a cocheras, garajes ni entradas vehiculares
+- estacionamiento_adaptado: ves claramente el símbolo internacional de discapacidad (silla de ruedas) pintado en el piso o una señal de accesibilidad/PMD visible en el espacio de estacionamiento. NO lo marques si solo ves una cochera o garaje sin esa señalización
 - ducha_nivel_piso: ves una ducha italiana, a nivel del piso, sin escalón ni bañera
 - pasamanos: ves pasamanos o barandas en escaleras, rampas o pasillos
-- planta_baja: la propiedad es claramente en planta baja o el acceso es sin escaleras
-- piso_antideslizante: el piso tiene textura antideslizante visible o cerámica rugosa
-- pasillo_ancho: los pasillos o corredores son claramente amplios"""
+"""
 
 
 def _url_a_base64(url: str) -> tuple[str, str] | None:
     try:
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
-        content_type = resp.headers.get("Content-Type", "image/jpeg").split(";")[0]
-        data = base64.standard_b64encode(resp.content).decode("utf-8")
+
+        if len(resp.content) > 5 * 1024 * 1024:
+            logger.warning(f"Imagen muy grande ({len(resp.content)//1024}KB), saltando: {url}")
+            return None
+
+        # Detectar tipo real por magic bytes en lugar de confiar en el header
+        content = resp.content
+        if content[:8] == b'\x89PNG\r\n\x1a\n':
+            content_type = "image/png"
+        elif content[:2] == b'\xff\xd8':
+            content_type = "image/jpeg"
+        elif content[:6] in (b'GIF87a', b'GIF89a'):
+            content_type = "image/gif"
+        elif content[:4] == b'RIFF' and content[8:12] == b'WEBP':
+            content_type = "image/webp"
+        else:
+            content_type = resp.headers.get("Content-Type", "image/jpeg").split(";")[0]
+
+        data = base64.standard_b64encode(content).decode("utf-8")
         return data, content_type
     except Exception as e:
         logger.warning(f"No se pudo descargar imagen {url}: {e}")

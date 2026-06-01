@@ -1,61 +1,104 @@
-import ScoreBar from './ScoreBar'
+import { SCORE_COLOR } from './ScoreBar'
 
 const FUENTE_LABEL = {
   mercadolibre: 'MercadoLibre',
   zonaprop:     'ZonaProp',
   mendozaprop:  'MendozaProp',
-}
-
-const FUENTE_COLOR = {
-  mercadolibre: 'bg-yellow-100 text-yellow-800',
-  zonaprop:     'bg-blue-100 text-blue-800',
-  mendozaprop:  'bg-purple-100 text-purple-800',
+  argenprop:    'Argenprop',
 }
 
 export default function PropertyCard({ prop, onClick }) {
-  const foto = prop.fotos_urls?.[0]
-  const nivel = prop.nivel_accesibilidad ?? null
+  const foto  = prop.fotos_urls?.[0]
+  const score = prop.score_accesibilidad
+  const color = score != null ? SCORE_COLOR(score) : 'var(--c-text3)'
+  const pct   = score != null ? Math.min((score / 10) * 100, 100) : 0
 
   return (
     <div
       onClick={onClick}
-      className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+      className="overflow-hidden cursor-pointer"
+      style={{
+        backgroundColor: 'var(--c-surface)',
+        borderRadius: 20,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.07), 0 0 1px rgba(0,0,0,0.06)',
+        transition: 'box-shadow 0.2s ease, transform 0.2s ease, background-color 0.25s ease',
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.boxShadow = '0 10px 32px rgba(0,0,0,0.14), 0 0 1px rgba(0,0,0,0.06)'
+        e.currentTarget.style.transform = 'translateY(-3px)'
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.07), 0 0 1px rgba(0,0,0,0.06)'
+        e.currentTarget.style.transform = 'translateY(0)'
+      }}
     >
-      <div className="h-44 bg-gray-100 overflow-hidden">
-        {foto
-          ? <img src={foto} alt={prop.titulo} className="w-full h-full object-cover" />
-          : <div className="w-full h-full flex items-center justify-center text-gray-300 text-4xl">🏠</div>
-        }
+      {/* Imagen */}
+      <div className="relative overflow-hidden" style={{ height: 180, borderRadius: '20px 20px 0 0' }}>
+        {foto ? (
+          <img src={foto} alt={prop.titulo} className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-5xl"
+            style={{ backgroundColor: 'var(--c-surface2)' }}>🏠</div>
+        )}
+
+        {/* Fuente */}
+        <span
+          className="absolute top-3 left-3 text-xs font-semibold px-2 py-1 rounded-full"
+          style={{ background: 'var(--c-frosted)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', color: 'var(--c-text)' }}
+        >
+          {FUENTE_LABEL[prop.fuente] ?? prop.fuente}
+        </span>
+
+        {/* Operación */}
+        {prop.tipo_operacion && (
+          <span
+            className="absolute top-3 right-3 text-xs font-semibold px-2 py-1 rounded-full"
+            style={{
+              background: prop.tipo_operacion === 'alquiler' ? 'rgba(0,122,255,0.85)' : 'rgba(175,82,222,0.85)',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              color: '#FFFFFF',
+            }}
+          >
+            {prop.tipo_operacion === 'alquiler' ? 'Alquiler' : 'Venta'}
+          </span>
+        )}
       </div>
 
-      <div className="p-4 space-y-3">
-        <div className="flex items-start justify-between gap-2">
-          <h3 className="text-sm font-semibold text-gray-800 line-clamp-2 leading-snug">{prop.titulo}</h3>
-          <div className="flex flex-col items-end gap-1 shrink-0">
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${FUENTE_COLOR[prop.fuente] ?? 'bg-gray-100 text-gray-600'}`}>
-              {FUENTE_LABEL[prop.fuente] ?? prop.fuente}
-            </span>
-            {prop.tipo_operacion && (
-              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${prop.tipo_operacion === 'alquiler' ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'}`}>
-                {prop.tipo_operacion === 'alquiler' ? 'Alquiler' : 'Venta'}
-              </span>
-            )}
-          </div>
-        </div>
+      {/* Cuerpo */}
+      <div className="p-5 space-y-3">
+        <h3 className="text-sm font-semibold line-clamp-2 leading-snug" style={{ color: 'var(--c-text)' }}>
+          {prop.titulo}
+        </h3>
 
         {prop.ubicacion && (
-          <p className="text-xs text-gray-500 flex items-center gap-1">
-            <span>📍</span>{prop.ubicacion}
+          <p className="text-xs flex items-center gap-1 truncate" style={{ color: 'var(--c-text2)' }}>
+            <span>📍</span><span className="truncate">{prop.ubicacion}</span>
           </p>
         )}
 
         {prop.precio && (
-          <p className="text-base font-bold text-gray-900">
+          <p className="text-lg font-bold tabular-nums" style={{ color: 'var(--c-text)', letterSpacing: '-0.3px' }}>
             ${prop.precio.toLocaleString('es-AR')}
           </p>
         )}
 
-        <ScoreBar score={prop.score_accesibilidad} nivel={nivel} />
+        {/* Score */}
+        <div className="space-y-1.5 pt-1">
+          <div className="flex items-center justify-between">
+            <span className="text-xs" style={{ color: 'var(--c-text2)' }}>
+              {prop.nivel_accesibilidad ?? 'Sin analizar'}
+            </span>
+            {score != null && (
+              <span className="text-xs font-bold tabular-nums" style={{ color }}>
+                {score.toFixed(1)}/10
+              </span>
+            )}
+          </div>
+          <div className="h-1 w-full rounded-full overflow-hidden" style={{ backgroundColor: 'var(--c-surface3)' }}>
+            <div className="h-1 rounded-full score-bar" style={{ width: `${pct}%`, backgroundColor: color }} />
+          </div>
+        </div>
       </div>
     </div>
   )

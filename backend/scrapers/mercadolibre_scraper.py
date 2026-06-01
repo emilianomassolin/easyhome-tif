@@ -62,9 +62,11 @@ def _parse_price(texto: str | None) -> float | None:
         return None
 
 
-def _save_items(db, items: list[dict]) -> int:
+def _save_items(db, items: list[dict], ids_vistos: set[str] | None = None) -> int:
     saved = 0
     for item in items:
+        if ids_vistos is not None:
+            ids_vistos.add(item["ml_id"])
         existing = db.query(Property).filter_by(ml_id=item["ml_id"]).first()
         if existing:
             existing.activa = True
@@ -84,7 +86,7 @@ def _save_items(db, items: list[dict]) -> int:
 
 # ── Modo API ──────────────────────────────────────────────────────────────────
 
-def _scrape_api(db, token: str) -> int:
+def _scrape_api(db, token: str, ids_vistos: set[str] | None = None) -> int:
     headers = {"Authorization": f"Bearer {token}"}
     total_saved = 0
 
@@ -150,7 +152,7 @@ def _scrape_api(db, token: str) -> int:
                         "activa":          True,
                     })
 
-                saved = _save_items(db, items)
+                saved = _save_items(db, items, ids_vistos)
                 total_saved += saved
                 logger.info(f"  {nombre} offset={offset}: {saved} props (total={total})")
 
@@ -204,7 +206,7 @@ def _extraer_cards_web(page, operacion: str) -> list[dict]:
     return propiedades
 
 
-def _scrape_web(db, max_paginas: int | None) -> int:
+def _scrape_web(db, max_paginas: int | None, ids_vistos: set[str] | None = None) -> int:
     total_saved = 0
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, args=[
@@ -243,7 +245,7 @@ def _scrape_web(db, max_paginas: int | None) -> int:
                         if not items:
                             break
 
-                        saved = _save_items(db, items)
+                        saved = _save_items(db, items, ids_vistos)
                         total_saved += saved
                         logger.info(f"  {tipo}/{operacion} pág {pagina + 1}: {saved} props.")
                         pagina += 1
@@ -260,25 +262,33 @@ def scrape_mercadolibre(max_paginas: int = None) -> int:
     logger.info("Iniciando scraping MercadoLibre...")
     db = SessionLocal()
     total_saved = 0
-
-    db.query(Property).filter_by(fuente="mercadolibre").update({"activa": False})
-    db.commit()
-    logger.info("MercadoLibre: propiedades existentes marcadas como inactivas.")
+    ids_vistos: set[str] = set()
 
     try:
         token = _get_token()
         if token:
             logger.info("Usando ML API (OAuth token disponible)")
-            total_saved = _scrape_api(db, token)
+            total_saved = _scrape_api(db, token, ids_vistos)
+            if total_saved == 0:
+                logger.info("ML API sin resultados (token sin permisos de IP) — usando Playwright (web scraping)")
+                total_saved = _scrape_web(db, max_paginas, ids_vistos)
         else:
             logger.info("Sin token OAuth — usando Playwright (web scraping)")
-            total_saved = _scrape_web(db, max_paginas)
+            total_saved = _scrape_web(db, max_paginas, ids_vistos)
     except Exception as e:
         db.rollback()
         logger.error(f"Error en scraping ML: {e}")
         raise
-    finally:
-        db.close()
+
+    if ids_vistos:
+        inactivadas = db.query(Property).filter(
+            Property.fuente == "mercadolibre",
+            ~Property.ml_id.in_(ids_vistos),
+        ).update({"activa": False}, synchronize_session=False)
+        db.commit()
+        logger.info(f"MercadoLibre: {inactivadas} propiedades no vistas marcadas como inactivas.")
+
+    db.close()
 
     logger.info(f"MercadoLibre: {total_saved} propiedades totales.")
     return total_saved

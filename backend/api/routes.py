@@ -175,6 +175,17 @@ def ml_auth_callback(request: Request, code: str = None, error: str = None, stat
     return HTMLResponse("<h2>✅ MercadoLibre autorizado correctamente. Podés cerrar esta ventana.</h2>")
 
 
+@router.get("/stats")
+def get_stats(db: Session = Depends(get_db)):
+    total = db.query(Property).filter(Property.activa == True).count()
+    con_accesibilidad = db.query(Property).filter(
+        Property.activa == True,
+        Property.analizado == True,
+        Property.score_accesibilidad > 0,
+    ).count()
+    return {"total": total, "con_accesibilidad": con_accesibilidad}
+
+
 @router.get("/properties", response_model=PropertiesResponse)
 def list_properties(
     skip: int = 0,
@@ -245,7 +256,7 @@ def analyze_property(property_id: int, db: Session = Depends(get_db)):
     else:
         nlp = RESULTADO_VACIO
         vision = VISION_VACIA
-    resultado = calcular_score(nlp, vision)
+    resultado = calcular_score(nlp, vision, prop.titulo)
 
     prop.nlp_resultado = nlp
     prop.vision_resultado = vision
@@ -298,7 +309,7 @@ def analyze_all(fuente: Optional[str] = None, db: Session = Depends(get_db)):
                 vision = VISION_VACIA
                 filtradas += 1
 
-            resultado = calcular_score(nlp, vision)
+            resultado = calcular_score(nlp, vision, prop.titulo)
             prop.nlp_resultado = nlp
             prop.vision_resultado = vision
             prop.score_accesibilidad = resultado["score_accesibilidad"]

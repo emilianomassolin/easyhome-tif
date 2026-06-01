@@ -1,15 +1,23 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { getProperty, analyzeProperty } from '../api'
-import ScoreBar from './ScoreBar'
+import { SCORE_COLOR } from './ScoreBar'
 
 const CRITERIOS_LABEL = {
-  rampa:                    '♿ Rampa de acceso',
-  ascensor:                 '🛗 Ascensor',
-  bano_adaptado:            '🚿 Baño adaptado',
-  entrada_ancha:            '🚪 Entrada ancha',
-  sin_escalones:            '✅ Sin escalones',
-  piso_plano:               '📐 Piso plano',
-  estacionamiento_adaptado: '🅿️ Estacionamiento PMD',
+  rampa:                    { icon: '♿', label: 'Rampa de acceso'      },
+  ascensor:                 { icon: '🛗', label: 'Ascensor'             },
+  bano_adaptado:            { icon: '🚿', label: 'Baño adaptado'        },
+  entrada_ancha:            { icon: '🚪', label: 'Entrada ancha'        },
+  estacionamiento_adaptado: { icon: '🅿️', label: 'Estacionamiento PMD' },
+  ducha_nivel_piso:         { icon: '🚿', label: 'Ducha italiana'       },
+  pasamanos:                { icon: '🪜', label: 'Pasamanos'            },
+  planta_baja:              { icon: '🏠', label: 'Planta baja'          },
+}
+
+const FUENTE_LABEL = {
+  mercadolibre: 'MercadoLibre',
+  zonaprop:     'ZonaProp',
+  mendozaprop:  'MendozaProp',
+  argenprop:    'Argenprop',
 }
 
 export default function PropertyModal({ id, onClose }) {
@@ -38,122 +46,228 @@ export default function PropertyModal({ id, onClose }) {
         criterios_detectados: result.criterios_detectados,
         analizado: true,
       }))
-    } catch (e) {
-      setError(e.message)
-    } finally {
-      setAnalyzing(false)
-    }
+    } catch (e) { setError(e.message) }
+    finally { setAnalyzing(false) }
   }
 
+  const score = prop?.score_accesibilidad
+  const color = score != null ? SCORE_COLOR(score) : 'var(--c-text3)'
+  const pct   = score != null ? Math.min((score / 10) * 100, 100) : 0
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4"
+      style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }}
+      onClick={onClose}
+    >
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        className="w-full sm:max-w-2xl overflow-y-auto"
+        style={{
+          backgroundColor: 'var(--c-surface)',
+          borderRadius: '24px 24px 0 0',
+          maxHeight: '92vh',
+          transition: 'background-color 0.25s ease',
+        }}
         onClick={e => e.stopPropagation()}
       >
+        {/* Handle mobile */}
+        <div className="flex justify-center pt-3 pb-1 sm:hidden">
+          <div className="w-10 h-1 rounded-full" style={{ backgroundColor: 'var(--c-surface3)' }} />
+        </div>
+
         {loading && (
-          <div className="p-8 text-center text-gray-500">Cargando...</div>
+          <div className="h-80 flex flex-col items-center justify-center gap-3" style={{ color: 'var(--c-text3)' }}>
+            <div className="w-7 h-7 rounded-full border-2 border-t-transparent animate-spin"
+              style={{ borderColor: 'var(--c-blue)', borderTopColor: 'transparent' }} />
+            <p className="text-sm">Cargando...</p>
+          </div>
         )}
 
         {error && (
-          <div className="p-8 text-center text-red-500">{error}</div>
+          <div className="h-80 flex items-center justify-center text-sm" style={{ color: '#FF453A' }}>{error}</div>
         )}
 
         {prop && !loading && (
           <>
             {/* Galería */}
-            {prop.fotos_urls?.length > 0 && (
-              <div className="relative h-56 bg-gray-100 overflow-hidden group">
-                <img
-                  src={prop.fotos_urls[fotoIdx]}
-                  alt={prop.titulo}
-                  className="w-full h-full object-cover"
-                />
-                {prop.fotos_urls.length > 1 && (
-                  <>
-                    <button
-                      onClick={() => setFotoIdx(i => (i - 1 + prop.fotos_urls.length) % prop.fotos_urls.length)}
-                      className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white rounded-full w-8 h-8 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                    >‹</button>
-                    <button
-                      onClick={() => setFotoIdx(i => (i + 1) % prop.fotos_urls.length)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white rounded-full w-8 h-8 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                    >›</button>
-                    <span className="absolute bottom-2 right-3 text-xs text-white bg-black/40 px-2 py-0.5 rounded-full">
-                      {fotoIdx + 1}/{prop.fotos_urls.length}
+            <div className="relative overflow-hidden group" style={{ height: 280, borderRadius: '24px 24px 0 0' }}>
+              {prop.fotos_urls?.length > 0 ? (
+                <img src={prop.fotos_urls[fotoIdx]} alt={prop.titulo} className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-6xl"
+                  style={{ backgroundColor: 'var(--c-surface2)' }}>🏠</div>
+              )}
+
+              <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
+
+              {prop.fotos_urls?.length > 1 && (
+                <>
+                  <button
+                    onClick={() => setFotoIdx(i => (i - 1 + prop.fotos_urls.length) % prop.fotos_urls.length)}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center rounded-full text-white text-xl opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ background: 'var(--c-frosted-dark)', backdropFilter: 'blur(8px)' }}
+                  >‹</button>
+                  <button
+                    onClick={() => setFotoIdx(i => (i + 1) % prop.fotos_urls.length)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center rounded-full text-white text-xl opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ background: 'var(--c-frosted-dark)', backdropFilter: 'blur(8px)' }}
+                  >›</button>
+                  <span
+                    className="absolute bottom-4 right-4 text-xs font-medium px-2.5 py-1 rounded-full"
+                    style={{ background: 'var(--c-frosted-dark)', backdropFilter: 'blur(8px)', color: 'rgba(255,255,255,0.9)' }}
+                  >
+                    {fotoIdx + 1}/{prop.fotos_urls.length}
+                  </span>
+                </>
+              )}
+
+              <button
+                onClick={onClose}
+                className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full text-white"
+                style={{ background: 'var(--c-frosted-dark)', backdropFilter: 'blur(8px)' }}
+              >✕</button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              {/* Badges + título */}
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {prop.tipo_operacion && (
+                    <span className="text-xs font-semibold px-3 py-1 rounded-full" style={{
+                      backgroundColor: prop.tipo_operacion === 'alquiler' ? 'rgba(10,132,255,0.15)' : 'rgba(191,90,242,0.15)',
+                      color: prop.tipo_operacion === 'alquiler' ? 'var(--c-blue)' : 'var(--c-purple)',
+                    }}>
+                      {prop.tipo_operacion === 'alquiler' ? 'Alquiler' : 'Venta'}
                     </span>
-                  </>
+                  )}
+                  <span className="text-xs font-medium px-3 py-1 rounded-full"
+                    style={{ backgroundColor: 'var(--c-surface2)', color: 'var(--c-text2)' }}>
+                    {FUENTE_LABEL[prop.fuente] ?? prop.fuente}
+                  </span>
+                </div>
+
+                <h2 className="text-xl font-bold leading-snug" style={{ color: 'var(--c-text)', letterSpacing: '-0.3px' }}>
+                  {prop.titulo}
+                </h2>
+
+                {prop.ubicacion && (
+                  <p className="text-sm flex items-center gap-1.5" style={{ color: 'var(--c-text2)' }}>
+                    <span>📍</span>{prop.ubicacion}
+                  </p>
                 )}
               </div>
-            )}
 
-            <div className="p-6 space-y-5">
-              {/* Header */}
-              <div className="flex items-start justify-between gap-4">
-                <h2 className="text-lg font-bold text-gray-900 leading-snug">{prop.titulo}</h2>
-                <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl shrink-0">✕</button>
-              </div>
-
-              {prop.ubicacion && (
-                <p className="text-sm text-gray-500">📍 {prop.ubicacion}</p>
-              )}
-
+              {/* Precio */}
               {prop.precio && (
-                <p className="text-2xl font-bold text-gray-900">${prop.precio.toLocaleString('es-AR')}</p>
+                <p className="text-3xl font-bold tabular-nums" style={{ color: 'var(--c-text)', letterSpacing: '-0.5px' }}>
+                  ${prop.precio.toLocaleString('es-AR')}
+                </p>
               )}
 
-              {/* Score */}
-              <div className="bg-gray-50 rounded-xl p-4 space-y-3">
-                <h3 className="text-sm font-semibold text-gray-700">Accesibilidad</h3>
-                <ScoreBar score={prop.score_accesibilidad} nivel={prop.nivel_accesibilidad} />
+              {/* Separador */}
+              <div style={{ height: 1, backgroundColor: 'var(--c-sep)' }} />
 
-                {prop.justificacion_score && (
-                  <p className="text-xs text-gray-500 leading-relaxed">{prop.justificacion_score}</p>
-                )}
+              {/* Accesibilidad */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-semibold" style={{ color: 'var(--c-text)' }}>Accesibilidad</h3>
+                  {score != null && (
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-2xl font-bold tabular-nums" style={{ color, letterSpacing: '-0.5px' }}>
+                        {score.toFixed(1)}
+                      </span>
+                      <span className="text-sm font-medium" style={{ color: 'var(--c-text3)' }}>/10</span>
+                    </div>
+                  )}
+                </div>
 
-                {/* Criterios */}
-                {prop.criterios_detectados && (
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    {Object.entries(CRITERIOS_LABEL).map(([key, label]) => {
-                      const detectado = prop.criterios_detectados?.[key]
-                      return (
-                        <div key={key} className={`flex items-center gap-2 text-xs px-2 py-1 rounded-lg ${detectado ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
-                          <span>{detectado ? '✓' : '–'}</span>
-                          <span>{label}</span>
-                        </div>
-                      )
-                    })}
-                  </div>
+                {score != null && (
+                  <>
+                    <div>
+                      <p className="text-sm font-medium mb-2" style={{ color: 'var(--c-text2)' }}>{prop.nivel_accesibilidad}</p>
+                      <div className="h-1.5 w-full rounded-full overflow-hidden" style={{ backgroundColor: 'var(--c-surface3)' }}>
+                        <div className="h-1.5 rounded-full score-bar" style={{ width: `${pct}%`, backgroundColor: color }} />
+                      </div>
+                    </div>
+
+                    {/* Criterios */}
+                    {prop.criterios_detectados && (
+                      <div className="grid grid-cols-2 gap-2">
+                        {Object.entries(CRITERIOS_LABEL).map(([key, { icon, label }]) => {
+                          const detectado = prop.criterios_detectados?.[key]
+                          return (
+                            <div
+                              key={key}
+                              className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl"
+                              style={{
+                                backgroundColor: detectado ? 'rgba(48,209,88,0.1)' : 'var(--c-surface2)',
+                                color: detectado ? 'var(--c-green)' : 'var(--c-text3)',
+                              }}
+                            >
+                              <span className="text-base">{icon}</span>
+                              <span className="font-medium text-xs flex-1">{label}</span>
+                              {detectado && (
+                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                                  <circle cx="7" cy="7" r="7" fill="var(--c-green)" />
+                                  <path d="M4 7l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                </svg>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+
+                    {prop.justificacion_score && (
+                      <p className="text-xs leading-relaxed" style={{ color: 'var(--c-text3)' }}>
+                        {prop.justificacion_score}
+                      </p>
+                    )}
+                  </>
                 )}
 
                 {!prop.analizado && (
                   <button
                     onClick={handleAnalyze}
                     disabled={analyzing}
-                    className="w-full mt-2 py-2 px-4 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                    className="w-full py-3 px-4 rounded-xl text-sm font-semibold text-white transition-opacity disabled:opacity-60"
+                    style={{ backgroundColor: 'var(--c-blue)' }}
                   >
-                    {analyzing ? 'Analizando con IA...' : '🤖 Analizar con Claude AI'}
+                    {analyzing ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <span className="w-4 h-4 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                        Analizando con IA...
+                      </span>
+                    ) : '🤖 Analizar accesibilidad con Claude AI'}
                   </button>
                 )}
               </div>
 
+              {/* Separador */}
+              <div style={{ height: 1, backgroundColor: 'var(--c-sep)' }} />
+
               {/* Descripción */}
               {prop.descripcion && (
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-1">Descripción</h3>
-                  <p className="text-sm text-gray-600 leading-relaxed line-clamp-5">{prop.descripcion}</p>
+                <div className="space-y-2">
+                  <h3 className="text-base font-semibold" style={{ color: 'var(--c-text)' }}>Descripción</h3>
+                  <p className="text-sm leading-relaxed whitespace-pre-line" style={{ color: 'var(--c-text2)' }}>
+                    {prop.descripcion}
+                  </p>
                 </div>
               )}
 
-              {/* Link */}
+              {/* CTA */}
               <a
                 href={prop.permalink_ml}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="block w-full text-center py-2.5 px-4 rounded-xl border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                className="flex items-center justify-center gap-2 w-full py-3.5 px-4 rounded-2xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                style={{ backgroundColor: 'var(--c-blue)' }}
               >
                 Ver publicación original →
               </a>
+
+              <div className="h-2" />
             </div>
           </>
         )}

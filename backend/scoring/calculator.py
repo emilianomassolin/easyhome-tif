@@ -3,19 +3,14 @@ CRITERIOS = [
     "ascensor",
     "bano_adaptado",
     "entrada_ancha",
-    "sin_escalones",
-    "piso_plano",
     "estacionamiento_adaptado",
     "ducha_nivel_piso",
     "pasamanos",
     "planta_baja",
-    "piso_antideslizante",
-    "pasillo_ancho",
 ]
 
 PESO_TEXTO  = 0.6
 PESO_VISION = 0.4
-PUNTOS_POR_CRITERIO = 10 / len(CRITERIOS)  # normalizado para que el máximo siempre sea 10
 
 NIVELES = [
     (8.5, "Muy accesible"),
@@ -24,18 +19,56 @@ NIVELES = [
     (0.0, "Poco accesible"),
 ]
 
+# Criterios que NO aplican según el tipo de propiedad
+CRITERIOS_EXCLUIDOS = {
+    "cochera": {
+        "ascensor", "bano_adaptado", "ducha_nivel_piso",
+        "pasamanos", "entrada_ancha",
+    },
+    "terreno": {
+        "ascensor", "bano_adaptado", "ducha_nivel_piso",
+        "pasamanos", "entrada_ancha",
+    },
+    "galpon": {
+        "ascensor", "bano_adaptado", "ducha_nivel_piso", "pasamanos",
+    },
+    "local": {
+        "bano_adaptado", "ducha_nivel_piso",
+    },
+}
 
-def calcular_score(nlp_resultado: dict, vision_resultado: dict) -> dict:
-    detectados_texto  = [c for c in CRITERIOS if nlp_resultado.get(c)]
-    detectados_vision = [c for c in CRITERIOS if vision_resultado.get(c)]
+_TIPOS_KEYWORDS = {
+    "cochera": ["cochera", "garage", "garaje", "estacionamiento solo", "box de estacionamiento"],
+    "terreno": ["terreno", "lote", "fraccion", "fracción", "campo", "chacra", "finca"],
+    "galpon":  ["galpón", "galpon", "deposito", "depósito", "nave industrial", "bodega"],
+    "local":   ["local", "comercial", "negocio", "consultorio"],
+}
+
+
+def detectar_tipo(titulo: str | None) -> str:
+    if not titulo:
+        return "otro"
+    t = titulo.lower()
+    for tipo, keywords in _TIPOS_KEYWORDS.items():
+        if any(kw in t for kw in keywords):
+            return tipo
+    return "otro"
+
+
+def _criterios_aplicables(tipo: str) -> list[str]:
+    excluidos = CRITERIOS_EXCLUIDOS.get(tipo, set())
+    return [c for c in CRITERIOS if c not in excluidos]
+
+
+def calcular_score(nlp_resultado: dict, vision_resultado: dict, titulo: str | None = None) -> dict:
+    tipo = detectar_tipo(titulo)
+    aplicables = _criterios_aplicables(tipo)
+
+    detectados_texto  = [c for c in aplicables if nlp_resultado.get(c)]
+    detectados_vision = [c for c in aplicables if vision_resultado.get(c)]
     detectados_total  = list(set(detectados_texto + detectados_vision))
 
-    puntos_texto  = len(detectados_texto)  * PUNTOS_POR_CRITERIO
-    puntos_vision = len(detectados_vision) * PUNTOS_POR_CRITERIO
-
-    score_texto  = min(puntos_texto  / 10, 1.0)
-    score_vision = min(puntos_vision / 10, 1.0)
-    score_final  = round((score_texto * PESO_TEXTO + score_vision * PESO_VISION) * 10, 2)
+    score_final = round(len(detectados_total) / len(aplicables) * 10, 2)
 
     nivel = next(nombre for umbral, nombre in NIVELES if score_final >= umbral)
 
@@ -50,9 +83,10 @@ def calcular_score(nlp_resultado: dict, vision_resultado: dict) -> dict:
     return {
         "score_accesibilidad": score_final,
         "nivel": nivel,
-        "criterios_detectados": {c: c in detectados_total for c in CRITERIOS},
+        "criterios_detectados": {c: c in detectados_total for c in aplicables},
         "justificacion": justificacion,
         "confianza": confianza,
+        "tipo_propiedad": tipo,
     }
 
 
@@ -68,7 +102,6 @@ def _generar_justificacion(detectados_texto: list, detectados_vision: list, scor
         "ducha_nivel_piso":         "Ducha a nivel de piso",
         "pasamanos":                "Pasamanos / barandas",
         "planta_baja":              "Planta baja",
-        "piso_antideslizante":      "Piso antideslizante",
         "pasillo_ancho":            "Pasillo ancho",
     }
 

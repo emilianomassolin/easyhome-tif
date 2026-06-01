@@ -26,3 +26,9 @@ export async function analyzeProperty(id) {
   if (!res.ok) throw new Error('Error al analizar')
   return res.json()
 }
+
+export async function getStats() {
+  const res = await fetch(`${BASE}/stats`)
+  if (!res.ok) throw new Error('Error al cargar stats')
+  return res.json()
+}

@@ -1,1 +1,91 @@
 @import "tailwindcss";
+
+*, *::before, *::after {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  box-sizing: border-box;
+}
+
+/* ── Tokens de color ───────────────────────────────────── */
+:root {
+  --c-bg:           #F5F5F7;
+  --c-surface:      #FFFFFF;
+  --c-surface2:     #F2F2F7;
+  --c-surface3:     #E5E5EA;
+  --c-text:         #1D1D1F;
+  --c-text2:        #6E6E73;
+  --c-text3:        #AEAEB2;
+  --c-border:       #D1D1D6;
+  --c-sep:          rgba(0,0,0,0.09);
+  --c-blue:         #007AFF;
+  --c-green:        #34C759;
+  --c-purple:       #AF52DE;
+  --c-seg:          #E5E5EA;
+  --c-seg-sel:      #FFFFFF;
+  --c-seg-txt:      #6E6E73;
+  --c-header:       rgba(255,255,255,0.82);
+  --c-filter:       rgba(255,255,255,0.75);
+  --c-frosted:      rgba(255,255,255,0.82);
+  --c-frosted-dark: rgba(0,0,0,0.35);
+  --c-input-bg:     #FFFFFF;
+  --c-input-border: #D1D1D6;
+  --c-placeholder:  rgba(60,60,67,0.3);
+}
+
+html.dark {
+  --c-bg:           #000000;
+  --c-surface:      #1C1C1E;
+  --c-surface2:     #2C2C2E;
+  --c-surface3:     #3A3A3C;
+  --c-text:         #FFFFFF;
+  --c-text2:        rgba(235,235,245,0.6);
+  --c-text3:        #636366;
+  --c-border:       rgba(84,84,88,0.65);
+  --c-sep:          rgba(84,84,88,0.6);
+  --c-blue:         #0A84FF;
+  --c-green:        #30D158;
+  --c-purple:       #BF5AF2;
+  --c-seg:          #2C2C2E;
+  --c-seg-sel:      #48484A;
+  --c-seg-txt:      rgba(235,235,245,0.6);
+  --c-header:       rgba(28,28,30,0.88);
+  --c-filter:       rgba(28,28,30,0.80);
+  --c-frosted:      rgba(44,44,46,0.85);
+  --c-frosted-dark: rgba(0,0,0,0.5);
+  --c-input-bg:     #2C2C2E;
+  --c-input-border: rgba(84,84,88,0.65);
+  --c-placeholder:  rgba(235,235,245,0.3);
+}
+
+/* ── Transición suave al cambiar tema ─────────────────── */
+body,
+.theme-bg    { background-color: var(--c-bg);      transition: background-color 0.25s ease; }
+.theme-surf  { background-color: var(--c-surface);  transition: background-color 0.25s ease; }
+.theme-surf2 { background-color: var(--c-surface2); transition: background-color 0.25s ease; }
+.theme-text  { color: var(--c-text);  transition: color 0.25s ease; }
+.theme-text2 { color: var(--c-text2); transition: color 0.25s ease; }
+
+body { background-color: var(--c-bg); }
+
+/* ── Select nativo con tema ───────────────────────────── */
+.apple-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--c-input-bg);
+  color: var(--c-text);
+  border: 1px solid var(--c-input-border);
+  border-radius: 10px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
+.apple-select:focus { outline: none; }
+
+/* ── Animación score bar ──────────────────────────────── */
+.score-bar {
+  transition: width 0.6s cubic-bezier(0.34,1.56,0.64,1);
+}

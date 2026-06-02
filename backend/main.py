@@ -7,6 +7,8 @@ from backend.database.connection import init_db
 from backend.scheduler.jobs import start_scheduler, stop_scheduler
 from backend.api.routes import router
 from backend.api.admin_routes import router as admin_router
+from backend.api.auth_routes import router as auth_router
+from backend.api.user_routes import router as user_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -31,3 +33,5 @@ app = FastAPI(
 
 app.include_router(router)
 app.include_router(admin_router)
+app.include_router(auth_router)
+app.include_router(user_router)

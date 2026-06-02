@@ -9,3 +9,7 @@ anthropic>=0.25
 beautifulsoup4
 playwright
 pytest
+passlib[bcrypt]
+bcrypt==4.0.1
+python-jose[cryptography]
+pydantic[email]

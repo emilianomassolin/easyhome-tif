@@ -58,6 +58,7 @@ class Report(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     property_id = Column(Integer, ForeignKey("properties.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     motivo = Column(String(100), nullable=False)
     descripcion = Column(Text, nullable=True)
     estado = Column(String(20), default="pendiente", nullable=False)  # pendiente | resuelto | ignorado
@@ -76,6 +77,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, nullable=False, index=True)
     nombre = Column(String, nullable=True)
+    password_hash = Column(String, nullable=True)
     activo = Column(Boolean, default=True, nullable=False)
     fecha_registro = Column(
         DateTime(timezone=True),
@@ -83,3 +85,30 @@ class User(Base):
         nullable=False,
     )
     ultima_actividad = Column(DateTime(timezone=True), nullable=True)
+    reset_token = Column(String, nullable=True, index=True)
+    reset_token_expiry = Column(DateTime(timezone=True), nullable=True)
+
+
+class UserPreferences(Base):
+    __tablename__ = "user_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
+    criterios = Column(JSONB, nullable=True)        # lista de criterios preferidos
+    zona = Column(String, nullable=True)
+    operacion = Column(String(20), nullable=True)   # alquiler | venta
+    precio_min = Column(Float, nullable=True)
+    precio_max = Column(Float, nullable=True)
+
+
+class Favorite(Base):
+    __tablename__ = "favorites"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    property_id = Column(Integer, ForeignKey("properties.id"), nullable=False, index=True)
+    fecha_guardado = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )

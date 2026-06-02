@@ -3,6 +3,10 @@ import { getProperties, getStats } from './api'
 import PropertyCard from './components/PropertyCard'
 import PropertyModal from './components/PropertyModal'
 import AdminPanel from './pages/AdminPanel'
+import { AuthProvider, useAuth } from './context/AuthContext'
+import LoginModal from './components/LoginModal'
+import ProfileModal from './components/ProfileModal'
+import FavoritesPage from './pages/FavoritesPage'
 
 const LIMIT = 20
 
@@ -77,15 +81,19 @@ function Segmented({ options, value, onChange }) {
   )
 }
 
-export default function App() {
-  const [dark, setDark]             = useState(() => localStorage.getItem('eh-dark') === 'true')
-  const [props, setProps]           = useState([])
-  const [total, setTotal]           = useState(0)
-  const [stats, setStats]           = useState({ total: 0, con_accesibilidad: 0 })
-  const [skip, setSkip]             = useState(0)
-  const [loading, setLoading]       = useState(true)
-  const [selectedId, setSelectedId] = useState(null)
-  const [showAdmin, setShowAdmin]   = useState(false)
+function AppContent() {
+  const { user, token, favoriteIds, toggleFavorite } = useAuth()
+  const [dark, setDark]               = useState(() => localStorage.getItem('eh-dark') === 'true')
+  const [props, setProps]             = useState([])
+  const [total, setTotal]             = useState(0)
+  const [stats, setStats]             = useState({ total: 0, con_accesibilidad: 0 })
+  const [skip, setSkip]               = useState(0)
+  const [loading, setLoading]         = useState(true)
+  const [selectedId, setSelectedId]   = useState(null)
+  const [showAdmin, setShowAdmin]     = useState(false)
+  const [showLogin, setShowLogin]     = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
+  const [showFavorites, setShowFavorites] = useState(false)
 
   const [fuente, setFuente]                 = useState('')
   const [minScore, setMinScore]             = useState('')
@@ -133,9 +141,8 @@ export default function App() {
   const currentPage = Math.floor(skip / LIMIT) + 1
   const hasFilters  = fuente || minScore || tipoOp || soloAnalizados || zona || tipoPropiedad || criterios.length > 0
 
-  if (showAdmin) {
-    return <AdminPanel onClose={() => setShowAdmin(false)} />
-  }
+  if (showAdmin) return <AdminPanel onClose={() => setShowAdmin(false)} />
+  if (showFavorites) return <FavoritesPage onClose={() => setShowFavorites(false)} />
 
   return (
     <div className="min-h-screen theme-bg">
@@ -189,6 +196,38 @@ export default function App() {
                 <p className="text-[11px] mt-0.5" style={{ color: 'var(--c-text2)' }}>con accesibilidad</p>
               </div>
             </div>
+
+            {user ? (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowFavorites(true)}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+                  style={{ backgroundColor: 'var(--c-surface2)', color: 'var(--c-text2)', border: '1px solid var(--c-border)' }}
+                  title="Mis favoritas"
+                >
+                  ❤️ {favoriteIds.size > 0 ? favoriteIds.size : 'Favoritas'}
+                </button>
+                <button
+                  onClick={() => setShowProfile(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+                  style={{ backgroundColor: 'var(--c-blue)', color: '#fff' }}
+                >
+                  <span className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold"
+                    style={{ backgroundColor: 'rgba(255,255,255,0.25)' }}>
+                    {(user.nombre || user.email)[0].toUpperCase()}
+                  </span>
+                  {user.nombre || user.email.split('@')[0]}
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowLogin(true)}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+                style={{ backgroundColor: 'var(--c-blue)', color: '#fff' }}
+              >
+                Iniciar sesión
+              </button>
+            )}
 
             <button
               onClick={() => setShowAdmin(true)}
@@ -306,7 +345,13 @@ export default function App() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
             {props.map(p => (
-              <PropertyCard key={p.id} prop={p} onClick={() => setSelectedId(p.id)} />
+              <PropertyCard
+                key={p.id}
+                prop={p}
+                onClick={() => setSelectedId(p.id)}
+                isFavorite={favoriteIds.has(p.id)}
+                onToggleFavorite={user ? e => { e.stopPropagation(); toggleFavorite(p.id) } : e => { e.stopPropagation(); setShowLogin(true) }}
+              />
             ))}
           </div>
         )}
@@ -333,7 +378,23 @@ export default function App() {
         )}
       </div>
 
-      {selectedId && <PropertyModal id={selectedId} onClose={() => setSelectedId(null)} />}
+      {selectedId && (
+        <PropertyModal
+          id={selectedId}
+          onClose={() => setSelectedId(null)}
+          onLoginRequired={() => { setSelectedId(null); setShowLogin(true) }}
+        />
+      )}
+      {showLogin && <LoginModal onClose={() => setShowLogin(false)} />}
+      {showProfile && <ProfileModal onClose={() => setShowProfile(false)} />}
     </div>
+  )
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   )
 }

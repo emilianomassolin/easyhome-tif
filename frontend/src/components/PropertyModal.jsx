@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { getProperty, analyzeProperty } from '../api'
 import { SCORE_COLOR } from './ScoreBar'
+import { useAuth } from '../context/AuthContext'
+import { authApi } from '../authApi'
 
 const CRITERIOS_LABEL = {
   rampa:                    { icon: '♿', label: 'Rampa de acceso'      },
@@ -20,12 +22,27 @@ const FUENTE_LABEL = {
   argenprop:    'Argenprop',
 }
 
-export default function PropertyModal({ id, onClose }) {
+const MOTIVOS_REPORTE = [
+  'Score incorrecto',
+  'Criterio de accesibilidad erróneo',
+  'Propiedad ya no disponible',
+  'Información desactualizada',
+  'Foto no corresponde',
+  'Otro',
+]
+
+export default function PropertyModal({ id, onClose, onLoginRequired }) {
+  const { user, token, favoriteIds, toggleFavorite } = useAuth()
   const [prop, setProp]           = useState(null)
   const [loading, setLoading]     = useState(true)
   const [analyzing, setAnalyzing] = useState(false)
   const [error, setError]         = useState(null)
   const [fotoIdx, setFotoIdx]     = useState(0)
+  const [showReport, setShowReport] = useState(false)
+  const [reportMotivo, setReportMotivo] = useState(MOTIVOS_REPORTE[0])
+  const [reportDesc, setReportDesc]   = useState('')
+  const [reportSending, setReportSending] = useState(false)
+  const [reportMsg, setReportMsg]     = useState('')
 
   useEffect(() => {
     getProperty(id)
@@ -33,6 +50,25 @@ export default function PropertyModal({ id, onClose }) {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [id])
+
+  const isFavorite = favoriteIds.has(id)
+
+  async function handleToggleFavorite() {
+    if (!user) { onLoginRequired?.(); return }
+    await toggleFavorite(id)
+  }
+
+  async function handleSendReport(e) {
+    e.preventDefault()
+    if (!user) { onLoginRequired?.(); return }
+    setReportSending(true)
+    try {
+      await authApi.createReport(token, id, reportMotivo, reportDesc)
+      setReportMsg('Reporte enviado. Te notificaremos cuando sea revisado.')
+      setReportDesc('')
+    } catch (err) { setReportMsg(`Error: ${err.message}`) }
+    finally { setReportSending(false) }
+  }
 
   async function handleAnalyze() {
     setAnalyzing(true)
@@ -126,6 +162,15 @@ export default function PropertyModal({ id, onClose }) {
                 className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full text-white"
                 style={{ background: 'var(--c-frosted-dark)', backdropFilter: 'blur(8px)' }}
               >✕</button>
+
+              <button
+                onClick={handleToggleFavorite}
+                className="absolute top-4 right-14 w-8 h-8 flex items-center justify-center rounded-full text-white transition-transform active:scale-90"
+                style={{ background: 'var(--c-frosted-dark)', backdropFilter: 'blur(8px)' }}
+                title={isFavorite ? 'Quitar de favoritas' : 'Guardar en favoritas'}
+              >
+                {isFavorite ? '❤️' : '🤍'}
+              </button>
             </div>
 
             <div className="p-6 space-y-6">
@@ -266,6 +311,52 @@ export default function PropertyModal({ id, onClose }) {
               >
                 Ver publicación original →
               </a>
+
+              {/* Reportar propiedad */}
+              <div>
+                {!showReport ? (
+                  <button onClick={() => setShowReport(true)}
+                    className="w-full py-2.5 px-4 rounded-2xl text-sm font-medium transition-opacity"
+                    style={{ backgroundColor: 'var(--c-surface2)', color: 'var(--c-text2)', border: '1px solid var(--c-border)' }}>
+                    ⚠️ Reportar información incorrecta
+                  </button>
+                ) : (
+                  <div className="rounded-2xl p-4 space-y-3"
+                    style={{ backgroundColor: 'var(--c-surface2)', border: '1px solid var(--c-border)' }}>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--c-text)' }}>Reportar propiedad</p>
+                    {reportMsg ? (
+                      <p className="text-sm" style={{ color: reportMsg.startsWith('Error') ? '#FF3B30' : 'var(--c-green)' }}>
+                        {reportMsg}
+                      </p>
+                    ) : (
+                      <form onSubmit={handleSendReport} className="space-y-3">
+                        <select value={reportMotivo} onChange={e => setReportMotivo(e.target.value)}
+                          className="apple-select w-full">
+                          {MOTIVOS_REPORTE.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                        <textarea value={reportDesc} onChange={e => setReportDesc(e.target.value)}
+                          placeholder="Descripción (opcional)"
+                          rows={3}
+                          className="w-full px-3 py-2 rounded-xl text-sm outline-none resize-none"
+                          style={{ backgroundColor: 'var(--c-input-bg)', border: '1px solid var(--c-input-border)', color: 'var(--c-text)' }}
+                        />
+                        <div className="flex gap-2">
+                          <button type="submit" disabled={reportSending}
+                            className="flex-1 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                            style={{ backgroundColor: '#FF9500' }}>
+                            {reportSending ? 'Enviando…' : 'Enviar reporte'}
+                          </button>
+                          <button type="button" onClick={() => setShowReport(false)}
+                            className="px-4 py-2 rounded-xl text-sm font-semibold"
+                            style={{ backgroundColor: 'var(--c-surface3)', color: 'var(--c-text2)' }}>
+                            Cancelar
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                )}
+              </div>
 
               <div className="h-2" />
             </div>

@@ -7,7 +7,7 @@ const FUENTE_LABEL = {
   argenprop:    'Argenprop',
 }
 
-export default function PropertyCard({ prop, onClick }) {
+export default function PropertyCard({ prop, onClick, isFavorite, onToggleFavorite }) {
   const foto  = prop.fotos_urls?.[0]
   const score = prop.score_accesibilidad
   const color = score != null ? SCORE_COLOR(score) : 'var(--c-text3)'
@@ -49,10 +49,22 @@ export default function PropertyCard({ prop, onClick }) {
           {FUENTE_LABEL[prop.fuente] ?? prop.fuente}
         </span>
 
+        {/* Favorito */}
+        {onToggleFavorite && (
+          <button
+            onClick={onToggleFavorite}
+            className="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-full transition-transform active:scale-90"
+            style={{ background: 'var(--c-frosted)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}
+            title={isFavorite ? 'Quitar de favoritas' : 'Guardar en favoritas'}
+          >
+            <span className="text-base">{isFavorite ? '❤️' : '🤍'}</span>
+          </button>
+        )}
+
         {/* Operación */}
         {prop.tipo_operacion && (
           <span
-            className="absolute top-3 right-3 text-xs font-semibold px-2 py-1 rounded-full"
+            className={`absolute text-xs font-semibold px-2 py-1 rounded-full ${onToggleFavorite ? 'top-3 right-12' : 'top-3 right-3'}`}
             style={{
               background: prop.tipo_operacion === 'alquiler' ? 'rgba(0,122,255,0.85)' : 'rgba(175,82,222,0.85)',
               backdropFilter: 'blur(12px)',

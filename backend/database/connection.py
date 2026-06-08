@@ -7,7 +7,13 @@ load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=60,
+    max_overflow=20,
+    pool_timeout=60,
+    pool_pre_ping=True,
+)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 Base = declarative_base()
 
@@ -30,10 +36,11 @@ def _run_migrations():
     """Agrega columnas nuevas a tablas ya existentes (idempotente)."""
     from sqlalchemy import text
     migrations = [
-        ("users", "password_hash",      "VARCHAR"),
-        ("users", "reset_token",        "VARCHAR"),
-        ("users", "reset_token_expiry", "TIMESTAMPTZ"),
-        ("reports", "user_id",          "INTEGER"),
+        ("users", "password_hash",        "VARCHAR"),
+        ("users", "reset_token",          "VARCHAR"),
+        ("users", "reset_token_expiry",   "TIMESTAMPTZ"),
+        ("reports", "user_id",            "INTEGER"),
+        ("properties", "manual_override", "JSONB"),
     ]
     with engine.connect() as conn:
         for table, col, col_type in migrations:

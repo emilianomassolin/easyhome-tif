@@ -21,7 +21,7 @@ from backend.nlp.keyword_filter import tiene_keywords_accesibilidad, RESULTADO_V
 
 router = APIRouter()
 
-_REDIRECT_URI = "https://overshot-wildcard-sublease.ngrok-free.dev/auth/callback"
+_REDIRECT_URI = os.getenv("ML_REDIRECT_URI", "http://localhost:8000/auth/callback")
 _pkce_store: dict[str, str] = {}   # state → code_verifier (in-memory, single process)
 
 

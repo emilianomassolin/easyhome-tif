@@ -48,9 +48,11 @@ Criterios:
 
 
 def analizar_texto(descripcion: str | None) -> dict:
+    vacio = {c: False for c in CRITERIOS_NLP} | {"confianza": 0.0}
+
     if not descripcion or not descripcion.strip():
         logger.warning("Descripción vacía, devolviendo resultado nulo.")
-        return {c: False for c in CRITERIOS_NLP} | {"confianza": 0.0}
+        return vacio
 
     try:
         response = client.messages.create(
@@ -64,9 +66,10 @@ def analizar_texto(descripcion: str | None) -> dict:
             if texto.startswith("json"):
                 texto = texto[4:]
         resultado = json.loads(texto.strip())
-        logger.info(f"NLP completado. Criterios detectados: {sum(1 for v in resultado.values() if v is True)}")
+        detectados = sum(1 for k, v in resultado.items() if k != "confianza" and v is True)
+        logger.info(f"NLP completado. Criterios detectados: {detectados}")
         return resultado
 
     except Exception as e:
         logger.error(f"Error en análisis NLP: {e}")
-        return {c: False for c in CRITERIOS_NLP} | {"confianza": 0.0}
+        return vacio

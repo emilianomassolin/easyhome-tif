@@ -12,3 +12,6 @@ venv/
 cert.key
 cert.crt
 .claude/
+*.db
+node_modules/
+frontend/dist/

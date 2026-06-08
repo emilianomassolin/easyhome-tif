@@ -1,7 +1,7 @@
-const BASE = '/api/admin'
+const BASE = (import.meta.env.VITE_API_URL || '') + '/api/admin'
 
 function headers(token) {
-  return { 'X-Admin-Token': token, 'Content-Type': 'application/json' }
+  return { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
 }
 
 async function req(token, path, opts = {}) {
@@ -26,9 +26,17 @@ export const adminApi = {
   reanalyzeProperty: (token, id) => req(token, `/properties/${id}/reanalyze`, { method: 'POST' }),
   setPropertyStatus: (token, id, activa) =>
     req(token, `/properties/${id}/status?activa=${activa}`, { method: 'PATCH' }),
-  exportCSV: (token, params = {}) => {
+  updateAccessibility: (token, id, override) =>
+    req(token, `/properties/${id}/accessibility`, { method: 'PATCH', body: JSON.stringify({ override }) }),
+  exportCSV: async (token, params = {}) => {
     const q = new URLSearchParams({ ...params })
-    return `${BASE}/properties/export?${q}&x_admin_token_header=${token}`
+    const res = await fetch(`${BASE}/properties/export?${q}`, { headers: headers(token) })
+    if (!res.ok) throw new Error('Error al exportar')
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = 'propiedades.csv'; a.click()
+    URL.revokeObjectURL(url)
   },
 
   // Reportes
@@ -50,10 +58,16 @@ export const adminApi = {
   // Scrapers
   runScraper: (token, fuente) => req(token, `/scrapers/${fuente}/run`, { method: 'POST' }),
   getScraperStreamUrl: (token, run_id) => `${BASE}/scrapers/${run_id}/stream?token=${encodeURIComponent(token)}`,
+  clearScraperLogs: (token) => req(token, '/scrapers/logs', { method: 'DELETE' }),
   getScraperLogs: (token, fuente) => {
     const q = fuente ? `?fuente=${fuente}` : ''
     return req(token, `/scrapers/logs${q}`)
   },
+
+  // Análisis
+  startAnalysis: (token, workers = 10) => req(token, `/analysis/start?workers=${workers}`, { method: 'POST' }),
+  getAnalysisStreamUrl: (token, run_id) => `${BASE}/analysis/${run_id}/stream?token=${encodeURIComponent(token)}`,
+  getAnalysisStatus: (token) => req(token, '/analysis/status'),
 
   // Usuarios
   getUsers: (token) => req(token, '/users'),

@@ -60,13 +60,22 @@ def _criterios_aplicables(tipo: str) -> list[str]:
     return [c for c in CRITERIOS if c not in excluidos]
 
 
-def calcular_score(nlp_resultado: dict, vision_resultado: dict, titulo: str | None = None) -> dict:
+def calcular_score(nlp_resultado: dict, vision_resultado: dict, titulo: str | None = None, manual_override: dict | None = None) -> dict:
     tipo = detectar_tipo(titulo)
     aplicables = _criterios_aplicables(tipo)
 
     detectados_texto  = [c for c in aplicables if nlp_resultado.get(c)]
     detectados_vision = [c for c in aplicables if vision_resultado.get(c)]
     detectados_total  = list(set(detectados_texto + detectados_vision))
+
+    if manual_override:
+        for criterio, valor in manual_override.items():
+            if criterio not in aplicables:
+                continue
+            if valor is True and criterio not in detectados_total:
+                detectados_total.append(criterio)
+            elif valor is False and criterio in detectados_total:
+                detectados_total.remove(criterio)
 
     score_final = round(len(detectados_total) / len(aplicables) * 10, 2)
 

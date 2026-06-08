@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { adminApi } from '../adminApi'
 
-const TABS = ['Dashboard', 'Propiedades', 'Reportes', 'Scrapers', 'Usuarios']
+const TABS = ['Dashboard', 'Propiedades', 'Reportes', 'Scrapers', 'Análisis', 'Usuarios']
 
 const FUENTES = ['mercadolibre', 'mendozaprop', 'zonaprop', 'argenprop']
 
@@ -247,6 +247,168 @@ function DashboardTab({ token }) {
   )
 }
 
+// ── Accessibility Modal ───────────────────────────────────────────────────────
+
+const CRITERIOS_LABELS = {
+  rampa:                    { label: 'Rampa de acceso',          emoji: '♿' },
+  ascensor:                 { label: 'Ascensor',                 emoji: '🛗' },
+  bano_adaptado:            { label: 'Baño adaptado',            emoji: '🚿' },
+  entrada_ancha:            { label: 'Entrada ancha',            emoji: '🚪' },
+  estacionamiento_adaptado: { label: 'Estacionamiento PMD',      emoji: '🅿️' },
+  ducha_nivel_piso:         { label: 'Ducha italiana',           emoji: '🚿' },
+  pasamanos:                { label: 'Pasamanos / barandas',     emoji: '🪜' },
+  planta_baja:              { label: 'Planta baja',              emoji: '🏠' },
+}
+
+function AccessibilityModal({ prop, token, onClose, onSaved }) {
+  const nlp    = prop.nlp_resultado    || {}
+  const vision = prop.vision_resultado || {}
+
+  // local state: null = auto (no override), true/false = manual
+  const [overrides, setOverrides] = useState(() => {
+    const init = {}
+    for (const key of Object.keys(CRITERIOS_LABELS)) {
+      const m = prop.manual_override || {}
+      init[key] = key in m ? m[key] : null
+    }
+    return init
+  })
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg]       = useState('')
+
+  function effectiveValue(key) {
+    if (overrides[key] !== null) return overrides[key]
+    return !!(nlp[key] || vision[key])
+  }
+
+  function cycle(key) {
+    setOverrides(prev => {
+      const cur = prev[key]
+      // null → true → false → null
+      const next = cur === null ? true : cur === true ? false : null
+      return { ...prev, [key]: next }
+    })
+  }
+
+  async function handleSave() {
+    setSaving(true); setMsg('')
+    const override = {}
+    for (const [k, v] of Object.entries(overrides)) {
+      if (v !== null) override[k] = v
+    }
+    try {
+      const res = await adminApi.updateAccessibility(token, prop.id, override)
+      setMsg(`Guardado · Nuevo score: ${res.score_accesibilidad}`)
+      onSaved(res)
+    } catch (e) { setMsg(`Error: ${e.message}`) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ backgroundColor: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(12px)' }}
+      onClick={onClose}>
+      <div className="w-full max-w-md rounded-3xl overflow-hidden"
+        style={{ backgroundColor: 'var(--c-surface)', border: '1px solid var(--c-border)', maxHeight: '90vh' }}
+        onClick={e => e.stopPropagation()}>
+
+        <div className="px-5 pt-5 pb-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1 min-w-0">
+              <h2 className="text-base font-bold" style={{ color: 'var(--c-text)' }}>
+                Editar accesibilidad
+              </h2>
+              <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--c-text2)' }}>{prop.titulo}</p>
+            </div>
+            <button onClick={onClose} className="w-6 h-6 flex items-center justify-center rounded-full shrink-0"
+              style={{ backgroundColor: 'var(--c-surface3)', color: 'var(--c-text2)' }}>✕</button>
+          </div>
+
+          <div className="mt-2 flex gap-3 text-[10px]" style={{ color: 'var(--c-text3)' }}>
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--c-green)' }} />
+              Auto detectado
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--c-blue)' }} />
+              Manual activado
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: '#FF3B30' }} />
+              Manual desactivado
+            </span>
+          </div>
+        </div>
+
+        <div className="px-5 pb-2 overflow-y-auto" style={{ maxHeight: 'calc(90vh - 200px)' }}>
+          <div className="space-y-1">
+            {Object.entries(CRITERIOS_LABELS).map(([key, { label, emoji }]) => {
+              const autoNlp    = !!nlp[key]
+              const autoVision = !!vision[key]
+              const override   = overrides[key]
+              const effective  = effectiveValue(key)
+
+              let rowBg = 'transparent'
+              let indicator = null
+              if (override === true)  { rowBg = 'rgba(10,132,255,0.08)';  indicator = { color: 'var(--c-blue)',  label: 'manual ✓' } }
+              if (override === false) { rowBg = 'rgba(255,59,48,0.08)';   indicator = { color: '#FF3B30',         label: 'manual ✗' } }
+              if (override === null && effective) { rowBg = 'rgba(52,199,89,0.06)' }
+
+              return (
+                <button
+                  key={key}
+                  onClick={() => cycle(key)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all"
+                  style={{ backgroundColor: rowBg, border: '1px solid var(--c-border)' }}
+                >
+                  <span className="text-lg w-6 text-center shrink-0">{emoji}</span>
+
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium" style={{ color: 'var(--c-text)' }}>{label}</p>
+                    <div className="flex gap-2 mt-0.5">
+                      <span className="text-[10px]" style={{ color: autoNlp ? 'var(--c-green)' : 'var(--c-text3)' }}>
+                        Texto {autoNlp ? '✓' : '✗'}
+                      </span>
+                      <span className="text-[10px]" style={{ color: autoVision ? 'var(--c-green)' : 'var(--c-text3)' }}>
+                        Imagen {autoVision ? '✓' : '✗'}
+                      </span>
+                      {indicator && (
+                        <span className="text-[10px] font-semibold" style={{ color: indicator.color }}>
+                          {indicator.label}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 w-5 h-5 rounded-md flex items-center justify-center"
+                    style={{
+                      backgroundColor: effective
+                        ? (override !== null ? (override ? 'var(--c-blue)' : '#FF3B30') : 'var(--c-green)')
+                        : 'var(--c-surface3)',
+                      border: effective ? 'none' : '1px solid var(--c-border)',
+                    }}>
+                    {effective && <span className="text-white text-[11px] font-bold">✓</span>}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="px-5 py-4 space-y-2" style={{ borderTop: '1px solid var(--c-border)' }}>
+          <p className="text-[10px] text-center" style={{ color: 'var(--c-text3)' }}>
+            Hacé clic en un criterio para activar · desactivar · quitar corrección manual
+          </p>
+          {msg && <p className="text-xs text-center font-medium" style={{ color: msg.startsWith('Error') ? '#FF3B30' : 'var(--c-green)' }}>{msg}</p>}
+          <Btn onClick={handleSave} disabled={saving} variant="primary">
+            {saving ? 'Guardando…' : 'Guardar y recalcular score'}
+          </Btn>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Propiedades Tab ───────────────────────────────────────────────────────────
 
 function PropertiesTab({ token }) {
@@ -257,7 +419,9 @@ function PropertiesTab({ token }) {
   const [fuente, setFuente] = useState('')
   const [analizado, setAnalizado] = useState('')
   const [activa, setActiva] = useState('true')
+  const [orden, setOrden] = useState('score_desc')
   const [actionMsg, setActionMsg] = useState('')
+  const [editingProp, setEditingProp] = useState(null)
   const LIMIT = 50
 
   const load = useCallback(async (newSkip = 0) => {
@@ -268,12 +432,13 @@ function PropertiesTab({ token }) {
       if (fuente) params.fuente = fuente
       if (analizado !== '') params.analizado = analizado
       if (activa !== '') params.activa = activa
+      if (orden) params.orden = orden
       const res = await adminApi.getProperties(token, params)
       setData(res)
       setSkip(newSkip)
     } finally {
       setLoading(false) }
-  }, [token, search, fuente, analizado, activa])
+  }, [token, search, fuente, analizado, activa, orden])
 
   useEffect(() => { load(0) }, [load])
 
@@ -292,6 +457,16 @@ function PropertiesTab({ token }) {
       setActionMsg(currentActiva ? 'Propiedad dada de baja' : 'Propiedad reactivada')
       load(skip)
     } catch (e) { setActionMsg(`Error: ${e.message}`) }
+  }
+
+  function handleAccessibilitySaved(res) {
+    setData(prev => prev ? {
+      ...prev,
+      propiedades: prev.propiedades.map(p =>
+        p.id === res.id ? { ...p, score_accesibilidad: res.score_accesibilidad, manual_override: res.manual_override } : p
+      )
+    } : prev)
+    setActionMsg(`Score actualizado: ${res.score_accesibilidad}`)
   }
 
   const total = data?.total ?? 0
@@ -321,6 +496,11 @@ function PropertiesTab({ token }) {
           <option value="true">Activas</option>
           <option value="false">Inactivas</option>
           <option value="">Todas</option>
+        </select>
+        <select value={orden} onChange={e => setOrden(e.target.value)} className="apple-select">
+          <option value="score_desc">Mayor score primero</option>
+          <option value="score_asc">Menor score primero</option>
+          <option value="">Más recientes</option>
         </select>
         <a
           href={`/api/admin/properties/export?activa=${activa}&fuente=${fuente}`}
@@ -376,11 +556,12 @@ function PropertiesTab({ token }) {
                     {fmt(p.fecha_creacion)}
                   </td>
                   <td className="px-3 py-2">
-                    <div className="flex gap-1">
-                      <Btn small variant="ghost" onClick={() => handleReanalyze(p.id)}>⟳</Btn>
+                    <div className="flex gap-1 flex-wrap">
+                      <Btn small variant="ghost" onClick={() => handleReanalyze(p.id)} title="Re-analizar con IA">⟳</Btn>
+                      <Btn small variant="ghost" onClick={() => setEditingProp(p)} title="Editar accesibilidad manualmente">♿</Btn>
                       <Btn small variant={p.activa ? 'danger' : 'green'}
                         onClick={() => handleStatus(p.id, p.activa)}>
-                        {p.activa ? 'Dar baja' : 'Activar'}
+                        {p.activa ? 'Baja' : 'Activar'}
                       </Btn>
                     </div>
                   </td>
@@ -398,6 +579,15 @@ function PropertiesTab({ token }) {
           <span>Página {currentPage} de {totalPages} · {total} propiedades</span>
           <Btn small variant="ghost" disabled={currentPage >= totalPages} onClick={() => load(skip + LIMIT)}>›</Btn>
         </div>
+      )}
+
+      {editingProp && (
+        <AccessibilityModal
+          prop={editingProp}
+          token={token}
+          onClose={() => setEditingProp(null)}
+          onSaved={res => { handleAccessibilitySaved(res); setEditingProp(null) }}
+        />
       )}
     </div>
   )
@@ -587,8 +777,17 @@ function ScrapersTab({ token }) {
 
       {/* Historial */}
       <Card className="overflow-hidden p-0">
-        <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--c-border)' }}>
+        <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--c-border)' }}>
           <h3 className="text-sm font-semibold" style={{ color: 'var(--c-text)' }}>Historial de ejecuciones</h3>
+          {logs.length > 0 && (
+            <Btn small variant="ghost" onClick={async () => {
+              if (!confirm('¿Borrar todo el historial?')) return
+              await adminApi.clearScraperLogs(token)
+              setLogs([])
+            }} style={{ color: '#FF3B30' }}>
+              Borrar historial
+            </Btn>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -711,38 +910,153 @@ function Loader() {
   )
 }
 
-// ── Main AdminPanel ───────────────────────────────────────────────────────────
+// ── Análisis Tab ──────────────────────────────────────────────────────────────
 
-export default function AdminPanel({ onClose }) {
-  const [token, setToken] = useState(() => localStorage.getItem('eh-admin-token') || '')
-  const [authenticated, setAuthenticated] = useState(false)
-  const [activeTab, setActiveTab] = useState('Dashboard')
+function AnalisisTab({ token }) {
+  const [status, setStatus] = useState(null)
+  const [running, setRunning] = useState(false)
+  const [logLines, setLogLines] = useState([])
+  const [progress, setProgress] = useState(null)
+  const [workers, setWorkers] = useState(10)
+  const esRef = useRef(null)
+  const logRef = useRef(null)
+
+  const loadStatus = () => adminApi.getAnalysisStatus(token).then(setStatus).catch(() => {})
 
   useEffect(() => {
-    if (token) {
-      adminApi.getDashboard(token)
-        .then(() => setAuthenticated(true))
-        .catch(() => {
-          localStorage.removeItem('eh-admin-token')
-          setToken('')
-        })
+    loadStatus()
+    const iv = setInterval(loadStatus, 10000)
+    return () => clearInterval(iv)
+  }, [token])
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [logLines])
+
+  async function handleStart() {
+    setRunning(true)
+    setLogLines(['Iniciando análisis...'])
+    setProgress(null)
+    try {
+      const { run_id } = await adminApi.startAnalysis(token, workers)
+      const url = adminApi.getAnalysisStreamUrl(token, run_id)
+      const es = new EventSource(url)
+      esRef.current = es
+
+      es.onmessage = (e) => {
+        const msg = e.data
+        if (msg === '__END__') {
+          es.close()
+          setRunning(false)
+          loadStatus()
+        } else if (msg.startsWith('PROGRESS:')) {
+          const parts = msg.split(' ')[0].replace('PROGRESS:', '').split(':')
+          const [analizadas, total, nlp, vision, errores] = parts.map(Number)
+          setProgress({ analizadas, total, nlp, vision, errores })
+          setLogLines(l => [...l.slice(-200), msg.split('| ').slice(1).join('| ')])
+        } else {
+          setLogLines(l => [...l.slice(-200), msg])
+        }
+      }
+      es.onerror = () => {
+        es.close()
+        setRunning(false)
+        setLogLines(l => [...l, '⚠️ Conexión interrumpida — el análisis sigue en el servidor. Recargá para ver progreso.'])
+      }
+    } catch (err) {
+      setRunning(false)
+      setLogLines(l => [...l, `❌ ${err.message}`])
     }
-  }, [])
-
-  function handleLogin(t) {
-    setToken(t)
-    setAuthenticated(true)
   }
 
-  function handleLogout() {
-    localStorage.removeItem('eh-admin-token')
-    setToken('')
-    setAuthenticated(false)
+  function handleStop() {
+    esRef.current?.close()
+    setRunning(false)
+    setLogLines(l => [...l, '⚠️ Desconectado del stream. El análisis continúa en el servidor.'])
   }
 
-  if (!authenticated) {
-    return <AdminLogin onLogin={handleLogin} />
-  }
+  const pct = progress ? Math.round((progress.analizadas / progress.total) * 100) :
+              status ? Math.round((status.analizadas / (status.total || 1)) * 100) : 0
+  const displayStatus = progress || status
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold" style={{ color: 'var(--c-text)' }}>Re-análisis de propiedades</h3>
+          <div className="flex items-center gap-2">
+            <span className="text-xs" style={{ color: 'var(--c-text3)' }}>Workers:</span>
+            <select value={workers} onChange={e => setWorkers(Number(e.target.value))} disabled={running}
+              className="text-xs rounded-lg px-2 py-1"
+              style={{ background: 'var(--c-surface)', border: '1px solid var(--c-border)', color: 'var(--c-text)' }}>
+              {[5, 10, 15, 20].map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            {running
+              ? <Btn small variant="ghost" onClick={handleStop}>Desconectar</Btn>
+              : <Btn small variant="primary" onClick={handleStart}>▶ Iniciar análisis</Btn>
+            }
+          </div>
+        </div>
+
+        {/* Stats */}
+        {displayStatus && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            {[
+              { label: 'Analizadas', value: displayStatus.analizadas?.toLocaleString() },
+              { label: 'Pendientes', value: (displayStatus.total - displayStatus.analizadas)?.toLocaleString() },
+              { label: 'Con visión', value: (progress?.vision ?? displayStatus?.vision)?.toLocaleString() ?? '—' },
+              { label: 'Errores', value: progress?.errores?.toLocaleString() ?? '—' },
+            ].map(({ label, value }) => (
+              <div key={label} className="rounded-xl p-3 text-center"
+                style={{ background: 'var(--c-surface2)', border: '1px solid var(--c-border)' }}>
+                <p className="text-lg font-bold" style={{ color: 'var(--c-text)' }}>{value}</p>
+                <p className="text-[10px]" style={{ color: 'var(--c-text3)' }}>{label}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Barra de progreso */}
+        {displayStatus && (
+          <div className="mb-4">
+            <div className="flex justify-between text-[11px] mb-1" style={{ color: 'var(--c-text3)' }}>
+              <span>{pct}% completado</span>
+              <span>{displayStatus.analizadas?.toLocaleString()} / {displayStatus.total?.toLocaleString()}</span>
+            </div>
+            <div className="rounded-full h-2 overflow-hidden" style={{ background: 'var(--c-border)' }}>
+              <div className="h-full rounded-full transition-all duration-500"
+                style={{ width: `${pct}%`, background: running ? 'var(--c-accent)' : 'var(--c-green)' }} />
+            </div>
+          </div>
+        )}
+
+        {/* Log */}
+        {logLines.length > 0 && (
+          <div ref={logRef}
+            className="rounded-xl p-3 text-[11px] font-mono max-h-64 overflow-y-auto space-y-0.5"
+            style={{ background: 'var(--c-bg)', border: '1px solid var(--c-border)' }}>
+            {logLines.map((line, i) => (
+              <p key={i} style={{ color: line.includes('❌') || line.includes('ERROR') ? '#FF3B30' : line.includes('✅') || line.includes('Finalizado') ? 'var(--c-green)' : line.includes('⚠️') ? '#FF9F0A' : 'var(--c-text2)' }}>
+                {line}
+              </p>
+            ))}
+            {running && <p style={{ color: 'var(--c-accent)' }}>● procesando...</p>}
+          </div>
+        )}
+
+        <p className="text-[10px] mt-3" style={{ color: 'var(--c-text3)' }}>
+          Si cerrás esta ventana o se corta la conexión, el análisis continúa en el servidor y se puede retomar.
+        </p>
+      </Card>
+    </div>
+  )
+}
+
+// ── Main AdminPanel ───────────────────────────────────────────────────────────
+
+export default function AdminPanel({ onClose, token: userToken }) {
+  const [activeTab, setActiveTab] = useState('Dashboard')
+  const token = userToken
 
   return (
     <div className="min-h-screen theme-bg">
@@ -783,7 +1097,6 @@ export default function AdminPanel({ onClose }) {
           </div>
 
           <div className="flex items-center gap-2">
-            <Btn small variant="ghost" onClick={handleLogout}>Salir</Btn>
             <Btn small variant="ghost" onClick={onClose}>✕ Cerrar</Btn>
           </div>
         </div>
@@ -795,6 +1108,7 @@ export default function AdminPanel({ onClose }) {
         {activeTab === 'Propiedades'  && <PropertiesTab token={token} />}
         {activeTab === 'Reportes'     && <ReportesTab   token={token} />}
         {activeTab === 'Scrapers'     && <ScrapersTab   token={token} />}
+        {activeTab === 'Análisis'     && <AnalisisTab   token={token} />}
         {activeTab === 'Usuarios'     && <UsuariosTab   token={token} />}
       </main>
     </div>

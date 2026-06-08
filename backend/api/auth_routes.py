@@ -35,8 +35,11 @@ class ResetBody(BaseModel):
     new_password: str
 
 
+ADMIN_EMAIL = "emilianomassolin@gmail.com"
+
+
 def _user_dict(u: User) -> dict:
-    return {"id": u.id, "email": u.email, "nombre": u.nombre, "activo": u.activo}
+    return {"id": u.id, "email": u.email, "nombre": u.nombre, "activo": u.activo, "is_admin": u.email == ADMIN_EMAIL}
 
 
 # ── Dependencia de autenticación ──────────────────────────────────────────────

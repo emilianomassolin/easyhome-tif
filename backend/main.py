@@ -1,7 +1,9 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database.connection import init_db
 from backend.scheduler.jobs import start_scheduler, stop_scheduler
@@ -29,6 +31,16 @@ app = FastAPI(
     description="Plataforma de viviendas accesibles para personas con movilidad reducida.",
     version="1.0.0",
     lifespan=lifespan,
+)
+
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(router)

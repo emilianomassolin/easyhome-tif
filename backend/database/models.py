@@ -39,6 +39,7 @@ class Property(Base):
     confianza_general = Column(Float, nullable=True)
     analizado = Column(Boolean, default=False, nullable=False)
     fecha_analisis = Column(DateTime(timezone=True), nullable=True)
+    manual_override = Column(JSONB, nullable=True)
 
 
 class ScraperLog(Base):

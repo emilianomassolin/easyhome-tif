@@ -11,6 +11,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import func, desc, case
 from sqlalchemy.orm import Session
 
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "admin-changeme")
+ADMIN_EMAIL = "emilianomassolin@gmail.com"
 
 
 def _check_token(token: str):
@@ -31,8 +33,27 @@ def _check_token(token: str):
         raise HTTPException(status_code=401, detail="Token de administrador inválido")
 
 
-async def require_admin(x_admin_token: str = Header(None)):
-    _check_token(x_admin_token)
+def _check_admin_jwt(authorization: str, db: Session):
+    from backend.core.security import decode_token
+    if not authorization or not authorization.startswith("Bearer "):
+        return False
+    payload = decode_token(authorization[7:])
+    if not payload:
+        return False
+    user = db.query(User).filter(User.id == int(payload["sub"]), User.activo == True).first()
+    return user is not None and user.email == ADMIN_EMAIL
+
+
+async def require_admin(
+    x_admin_token: str = Header(None),
+    authorization: str = Header(None),
+    db: Session = Depends(get_db),
+):
+    if x_admin_token and x_admin_token == ADMIN_TOKEN:
+        return
+    if _check_admin_jwt(authorization, db):
+        return
+    raise HTTPException(status_code=401, detail="No autorizado")
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -165,6 +186,7 @@ def admin_list_properties(
     analizado: Optional[bool] = None,
     activa: Optional[bool] = None,
     search: Optional[str] = None,
+    orden: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     query = db.query(Property)
@@ -178,7 +200,15 @@ def admin_list_properties(
         query = query.filter(Property.titulo.ilike(f"%{search}%"))
 
     total = query.count()
-    props = query.order_by(desc(Property.fecha_creacion)).offset(skip).limit(limit).all()
+
+    if orden == "score_desc":
+        order = Property.score_accesibilidad.desc().nullslast()
+    elif orden == "score_asc":
+        order = Property.score_accesibilidad.asc().nullsfirst()
+    else:
+        order = desc(Property.fecha_creacion)
+
+    props = query.order_by(order).offset(skip).limit(limit).all()
 
     return {
         "total": total,
@@ -196,6 +226,9 @@ def admin_list_properties(
                 "fecha_creacion": p.fecha_creacion.isoformat() if p.fecha_creacion else None,
                 "fecha_analisis": p.fecha_analisis.isoformat() if p.fecha_analisis else None,
                 "permalink_ml": p.permalink_ml,
+                "nlp_resultado": p.nlp_resultado,
+                "vision_resultado": p.vision_resultado,
+                "manual_override": p.manual_override or {},
             }
             for p in props
         ],
@@ -250,6 +283,43 @@ def admin_update_property_status(
     prop.activa = activa
     db.commit()
     return {"id": prop.id, "activa": prop.activa}
+
+
+class AccessibilityOverrideBody(BaseModel):
+    override: dict  # { "rampa": true, "entrada_ancha": true, "ascensor": false, ... }
+
+
+@router.patch("/properties/{property_id}/accessibility", dependencies=[Depends(require_admin)])
+def admin_update_accessibility(
+    property_id: int,
+    body: AccessibilityOverrideBody,
+    db: Session = Depends(get_db),
+):
+    from backend.scoring.calculator import calcular_score, CRITERIOS
+
+    prop = db.query(Property).filter(Property.id == property_id).first()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Propiedad no encontrada")
+
+    valid_criterios = set(CRITERIOS)
+    override = {k: v for k, v in body.override.items() if k in valid_criterios and isinstance(v, bool)}
+
+    prop.manual_override = override
+    nlp = prop.nlp_resultado or {}
+    vision = prop.vision_resultado or {}
+    resultado = calcular_score(nlp, vision, prop.titulo, manual_override=override)
+
+    prop.score_accesibilidad = resultado["score_accesibilidad"]
+    prop.justificacion_score = resultado["justificacion"]
+    prop.analizado = True
+    db.commit()
+
+    return {
+        "id": prop.id,
+        "score_accesibilidad": prop.score_accesibilidad,
+        "manual_override": prop.manual_override,
+        "criterios_detectados": resultado["criterios_detectados"],
+    }
 
 
 # ── Reportes ──────────────────────────────────────────────────────────────────
@@ -419,8 +489,13 @@ def run_scraper(fuente: str, db: Session = Depends(get_db)):
 
 
 @router.get("/scrapers/{run_id}/stream")
-async def stream_scraper_log(run_id: str, token: str = Query(None)):
-    _check_token(token)
+async def stream_scraper_log(run_id: str, token: str = Query(None), db: Session = Depends(get_db)):
+    if token and token == ADMIN_TOKEN:
+        pass
+    elif _check_admin_jwt(f"Bearer {token}" if token else None, db):
+        pass
+    else:
+        raise HTTPException(status_code=401, detail="No autorizado")
 
     async def generate():
         q = _run_queues.get(run_id)
@@ -459,6 +534,13 @@ async def stream_scraper_log(run_id: str, token: str = Query(None)):
     )
 
 
+@router.delete("/scrapers/logs", dependencies=[Depends(require_admin)])
+def clear_scraper_logs(db: Session = Depends(get_db)):
+    deleted = db.query(ScraperLog).filter(ScraperLog.estado != "running").delete()
+    db.commit()
+    return {"deleted": deleted}
+
+
 @router.get("/scrapers/logs", dependencies=[Depends(require_admin)])
 def get_scraper_logs(
     fuente: Optional[str] = None,
@@ -482,6 +564,88 @@ def get_scraper_logs(
         }
         for l in logs
     ]
+
+
+# ── Análisis ──────────────────────────────────────────────────────────────────
+
+@router.post("/analysis/start", dependencies=[Depends(require_admin)])
+def start_analysis(workers: int = 10):
+    run_id = uuid.uuid4().hex[:8]
+    q: queue.Queue = queue.Queue(maxsize=5000)
+    _run_queues[run_id] = q
+
+    def _run():
+        from backend.scripts.analyze_all_fast import main
+        try:
+            count = main(workers=workers, progress_queue=q)
+            q.put(f"__DONE__{count}")
+        except Exception as e:
+            q.put(f"__ERROR__{e}")
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {"run_id": run_id}
+
+
+@router.get("/analysis/{run_id}/stream")
+async def stream_analysis(run_id: str, token: str = Query(None), db: Session = Depends(get_db)):
+    if token and token == ADMIN_TOKEN:
+        pass
+    elif _check_admin_jwt(f"Bearer {token}" if token else None, db):
+        pass
+    else:
+        raise HTTPException(status_code=401, detail="No autorizado")
+
+    async def generate():
+        q = _run_queues.get(run_id)
+        if not q:
+            yield "data: ERROR: run_id no encontrado\n\n"
+            return
+        loop = asyncio.get_event_loop()
+        while True:
+            try:
+                msg = await loop.run_in_executor(None, lambda: q.get(timeout=300))
+                if msg.startswith("__DONE__"):
+                    yield f"data: ✅ Completado: {msg[8:]} propiedades analizadas\n\n"
+                    yield "data: __END__\n\n"
+                    _run_queues.pop(run_id, None)
+                    break
+                elif msg.startswith("__ERROR__"):
+                    yield f"data: ❌ Error: {msg[9:]}\n\n"
+                    yield "data: __END__\n\n"
+                    _run_queues.pop(run_id, None)
+                    break
+                else:
+                    yield f"data: {msg}\n\n"
+            except Exception:
+                yield "data: [esperando progreso...]\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
+@router.get("/analysis/status", dependencies=[Depends(require_admin)])
+def analysis_status(db: Session = Depends(get_db)):
+    from sqlalchemy import func, case, text
+    r = db.query(
+        func.count(Property.id).label("total"),
+        func.sum(case((Property.analizado == True, 1), else_=0)).label("analizadas"),
+    ).filter(Property.activa == True).one()
+
+    vision = db.execute(text(
+        "SELECT COUNT(*) FROM properties WHERE activa=true AND analizado=true "
+        "AND (vision_resultado->>'imagenes_analizadas')::int > 0"
+    )).scalar() or 0
+
+    return {
+        "total": int(r.total or 0),
+        "analizadas": int(r.analizadas or 0),
+        "pendientes": int(r.total or 0) - int(r.analizadas or 0),
+        "vision": int(vision),
+        "en_curso": bool(_run_queues),
+    }
 
 
 # ── Usuarios ──────────────────────────────────────────────────────────────────

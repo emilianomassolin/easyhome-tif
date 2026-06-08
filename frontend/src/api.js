@@ -1,4 +1,4 @@
-const BASE = '/api'
+const BASE = (import.meta.env.VITE_API_URL || '') + '/api'
 
 export async function getProperties({ skip = 0, limit = 20, fuente, min_score, tipo_operacion, solo_analizados, zona, tipo_propiedad, criterios, orden } = {}) {
   const params = new URLSearchParams({ skip, limit })

@@ -141,7 +141,7 @@ function AppContent() {
   const currentPage = Math.floor(skip / LIMIT) + 1
   const hasFilters  = fuente || minScore || tipoOp || soloAnalizados || zona || tipoPropiedad || criterios.length > 0
 
-  if (showAdmin) return <AdminPanel onClose={() => setShowAdmin(false)} />
+  if (showAdmin) return <AdminPanel token={token} onClose={() => setShowAdmin(false)} />
   if (showFavorites) return <FavoritesPage onClose={() => setShowFavorites(false)} />
 
   return (
@@ -207,6 +207,16 @@ function AppContent() {
                 >
                   ❤️ {favoriteIds.size > 0 ? favoriteIds.size : 'Favoritas'}
                 </button>
+                {user.is_admin && (
+                  <button
+                    onClick={() => setShowAdmin(true)}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+                    style={{ backgroundColor: 'var(--c-surface2)', color: 'var(--c-text2)', border: '1px solid var(--c-border)' }}
+                    title="Panel de administración"
+                  >
+                    Admin
+                  </button>
+                )}
                 <button
                   onClick={() => setShowProfile(true)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
@@ -228,15 +238,6 @@ function AppContent() {
                 Iniciar sesión
               </button>
             )}
-
-            <button
-              onClick={() => setShowAdmin(true)}
-              className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
-              style={{ backgroundColor: 'var(--c-surface2)', color: 'var(--c-text2)', border: '1px solid var(--c-border)' }}
-              title="Panel de administración"
-            >
-              ⚙️ Admin
-            </button>
 
             <DarkToggle dark={dark} onToggle={() => setDark(d => !d)} />
           </div>

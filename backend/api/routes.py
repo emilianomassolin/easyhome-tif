@@ -9,7 +9,7 @@ import requests as _req
 from dotenv import set_key
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from backend.database.connection import get_db
@@ -61,14 +61,13 @@ class PropertyListItem(BaseModel):
     nivel_accesibilidad: Optional[str] = None
     fecha_creacion: datetime
 
+    model_config = ConfigDict(from_attributes=True)
+
     @classmethod
     def from_orm_with_nivel(cls, obj):
         data = cls.model_validate(obj)
         data.nivel_accesibilidad = _nivel(obj.score_accesibilidad)
         return data
-
-    class Config:
-        from_attributes = True
 
 
 class PropertyDetail(BaseModel):
@@ -105,8 +104,7 @@ class PropertyDetail(BaseModel):
             data.criterios_detectados = {c: c in todos for c in CRITERIOS}
         return data
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PropertiesResponse(BaseModel):
@@ -454,6 +452,7 @@ def votar_criterio(
     )
 
     applied = False
+    nuevo_score = None
     if count >= VOTOS_THRESHOLD:
         override = dict(prop.manual_override or {})
         override[body.criterio] = body.valor
@@ -468,8 +467,9 @@ def votar_criterio(
         prop.justificacion_score = resultado["justificacion"]
         db.commit()
         applied = True
+        nuevo_score = resultado["score_accesibilidad"]
 
-    return {"ok": True, "votos": count, "applied": applied}
+    return {"ok": True, "votos": count, "applied": applied, "score_accesibilidad": nuevo_score}
 
 
 @router.delete("/properties/{property_id}/votos_criterios/{criterio}")

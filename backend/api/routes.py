@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.database.connection import get_db
-from backend.database.models import Property, Comentario, User
+from backend.database.models import Property, Comentario, User, VotoCriterio
 from backend.nlp.analyzer import analizar_texto
 from backend.vision.image_analyzer import analizar_imagenes
 from backend.scoring.calculator import calcular_score
@@ -96,6 +96,12 @@ class PropertyDetail(BaseModel):
         if obj.analizado and (criterios or vision):
             from backend.scoring.calculator import CRITERIOS
             todos = {c for c in CRITERIOS if criterios.get(c) or vision.get(c)}
+            override = obj.manual_override or {}
+            for c, v in override.items():
+                if v is True:
+                    todos.add(c)
+                elif v is False:
+                    todos.discard(c)
             data.criterios_detectados = {c: c in todos for c in CRITERIOS}
         return data
 
@@ -364,6 +370,106 @@ def delete_comment(comment_id: int, db: Session = Depends(get_db), request: Requ
     comment.activo = False
     db.commit()
     return {"ok": True}
+
+
+CRITERIOS_VALIDOS = [
+    "rampa", "ascensor", "bano_adaptado", "entrada_ancha",
+    "estacionamiento_adaptado", "ducha_nivel_piso", "pasamanos", "planta_baja",
+]
+
+VOTOS_THRESHOLD = 3
+
+
+class VotoCriterioIn(BaseModel):
+    criterio: str
+    valor: bool
+
+
+@router.get("/properties/{property_id}/votos_criterios")
+def get_votos_criterios(property_id: int, db: Session = Depends(get_db)):
+    from sqlalchemy import func
+    rows = (
+        db.query(VotoCriterio.criterio, VotoCriterio.valor, func.count().label("n"))
+        .filter(VotoCriterio.property_id == property_id)
+        .group_by(VotoCriterio.criterio, VotoCriterio.valor)
+        .all()
+    )
+    result: dict = {}
+    for r in rows:
+        if r.criterio not in result:
+            result[r.criterio] = {"true": 0, "false": 0}
+        result[r.criterio]["true" if r.valor else "false"] = r.n
+    return result
+
+
+@router.post("/properties/{property_id}/votar_criterio")
+def votar_criterio(
+    property_id: int,
+    body: VotoCriterioIn,
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    from backend.core.security import decode_token
+    from sqlalchemy import func
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    auth = request.headers.get("Authorization", "") if request else ""
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Se requiere iniciar sesión para votar")
+    payload = decode_token(auth[7:])
+    if not payload:
+        raise HTTPException(status_code=401, detail="Token inválido o expirado")
+    user = db.query(User).filter(User.id == int(payload["sub"]), User.activo == True).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Usuario no encontrado")
+
+    if body.criterio not in CRITERIOS_VALIDOS:
+        raise HTTPException(status_code=400, detail="Criterio no válido")
+
+    prop = db.query(Property).filter(Property.id == property_id, Property.activa == True).first()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Propiedad no encontrada")
+
+    stmt = pg_insert(VotoCriterio).values(
+        property_id=property_id,
+        user_id=user.id,
+        criterio=body.criterio,
+        valor=body.valor,
+        fecha=datetime.now(timezone.utc),
+    ).on_conflict_do_update(
+        constraint="uq_voto_criterio",
+        set_={"valor": body.valor, "fecha": datetime.now(timezone.utc)},
+    )
+    db.execute(stmt)
+    db.commit()
+
+    count = (
+        db.query(func.count())
+        .filter(
+            VotoCriterio.property_id == property_id,
+            VotoCriterio.criterio == body.criterio,
+            VotoCriterio.valor == body.valor,
+        )
+        .scalar()
+    )
+
+    applied = False
+    if count >= VOTOS_THRESHOLD:
+        override = dict(prop.manual_override or {})
+        override[body.criterio] = body.valor
+        prop.manual_override = override
+        resultado = calcular_score(
+            prop.nlp_resultado or {},
+            prop.vision_resultado or {},
+            prop.titulo,
+            override,
+        )
+        prop.score_accesibilidad = resultado["score_accesibilidad"]
+        prop.justificacion_score = resultado["justificacion"]
+        db.commit()
+        applied = True
+
+    return {"ok": True, "votos": count, "applied": applied}
 
 
 @router.post("/scrape/argenprop")

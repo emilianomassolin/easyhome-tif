@@ -27,7 +27,7 @@ def get_db():
 
 
 def init_db():
-    from backend.database.models import Property, ScraperLog, Report, User, UserPreferences, Favorite, Comentario, SnapshotPropiedades  # noqa: F401
+    from backend.database.models import Property, ScraperLog, Report, User, UserPreferences, Favorite, Comentario, SnapshotPropiedades, VotoCriterio  # noqa: F401
     Base.metadata.create_all(bind=engine)
     _run_migrations()
     _fix_stuck_scrapers()

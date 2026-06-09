@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from datetime import datetime, timezone
 
@@ -128,6 +128,19 @@ class Comentario(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+
+class VotoCriterio(Base):
+    __tablename__ = "votos_criterios"
+
+    id = Column(Integer, primary_key=True, index=True)
+    property_id = Column(Integer, ForeignKey("properties.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    criterio = Column(String(50), nullable=False)
+    valor = Column(Boolean, nullable=False)  # True = "sí tiene" / False = "no tiene"
+    fecha = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (UniqueConstraint('property_id', 'user_id', 'criterio', name='uq_voto_criterio'),)
 
 
 class SnapshotPropiedades(Base):

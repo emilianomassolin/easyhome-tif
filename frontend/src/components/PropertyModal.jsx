@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getProperty, analyzeProperty, getComments, addComment, deleteComment } from '../api'
+import { getProperty, analyzeProperty, getComments, addComment, deleteComment, getVotosCriterios, votarCriterio } from '../api'
 import { SCORE_COLOR } from './ScoreBar'
 import { useAuth } from '../context/AuthContext'
 import { authApi } from '../authApi'
@@ -49,12 +49,18 @@ export default function PropertyModal({ id, onClose, onLoginRequired }) {
   const [commentSending, setCommentSending] = useState(false)
   const [commentError, setCommentError]   = useState('')
 
+  const [votos, setVotos]               = useState({})
+  const [miVoto, setMiVoto]             = useState({})   // criterio → true/false
+  const [votando, setVotando]           = useState(null)  // criterio que está en proceso
+  const [votoMsg, setVotoMsg]           = useState('')
+
   useEffect(() => {
     getProperty(id)
       .then(setProp)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
     getComments(id).then(setComments).catch(() => {})
+    getVotosCriterios(id).then(setVotos).catch(() => {})
   }, [id])
 
   async function handleAddComment(e) {
@@ -77,6 +83,38 @@ export default function PropertyModal({ id, onClose, onLoginRequired }) {
       await deleteComment(commentId, token)
       setComments(prev => prev.filter(c => c.id !== commentId))
     } catch (err) { setCommentError(err.message) }
+  }
+
+  async function handleVotar(criterio, valor) {
+    if (!user) { onLoginRequired?.(); return }
+    if (votando) return
+    setVotando(criterio)
+    setVotoMsg('')
+    try {
+      const res = await votarCriterio(id, criterio, valor, token)
+      setMiVoto(prev => ({ ...prev, [criterio]: valor }))
+      setVotos(prev => {
+        const updated = { ...prev }
+        if (!updated[criterio]) updated[criterio] = { true: 0, false: 0 }
+        updated[criterio] = { ...updated[criterio], [String(valor)]: res.votos }
+        return updated
+      })
+      if (res.applied) {
+        setProp(prev => ({
+          ...prev,
+          criterios_detectados: { ...prev.criterios_detectados, [criterio]: valor },
+          score_accesibilidad: res.score ?? prev.score_accesibilidad,
+        }))
+        setVotoMsg(`¡3 votos alcanzados! El criterio fue ${valor ? 'agregado' : 'eliminado'} automáticamente.`)
+      } else {
+        setVotoMsg(`Voto registrado. ${res.votos}/3 votos necesarios.`)
+      }
+    } catch (err) {
+      setVotoMsg(err.message)
+    } finally {
+      setVotando(null)
+      setTimeout(() => setVotoMsg(''), 4000)
+    }
   }
 
   const isFavorite = favoriteIds.has(id)
@@ -265,29 +303,66 @@ export default function PropertyModal({ id, onClose, onLoginRequired }) {
 
                     {/* Criterios */}
                     {prop.criterios_detectados && (
-                      <div className="grid grid-cols-2 gap-2">
-                        {Object.entries(CRITERIOS_LABEL).map(([key, { icon, label }]) => {
-                          const detectado = prop.criterios_detectados?.[key]
-                          return (
-                            <div
-                              key={key}
-                              className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl"
-                              style={{
-                                backgroundColor: detectado ? 'rgba(48,209,88,0.1)' : 'var(--c-surface2)',
-                                color: detectado ? 'var(--c-green)' : 'var(--c-text3)',
-                              }}
-                            >
-                              <span className="text-base">{icon}</span>
-                              <span className="font-medium text-xs flex-1">{label}</span>
-                              {detectado && (
-                                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                                  <circle cx="7" cy="7" r="7" fill="var(--c-green)" />
-                                  <path d="M4 7l2 2 4-4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                                </svg>
-                              )}
-                            </div>
-                          )
-                        })}
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          {Object.entries(CRITERIOS_LABEL).map(([key, { icon, label }]) => {
+                            const detectado = prop.criterios_detectados?.[key]
+                            const votosKey = votos[key] || { true: 0, false: 0 }
+                            const yaVote = key in miVoto
+                            const votosContra = detectado ? (votosKey.false || 0) : (votosKey.true || 0)
+                            return (
+                              <div
+                                key={key}
+                                className="flex items-center gap-2 px-3 py-2.5 rounded-xl group"
+                                style={{
+                                  backgroundColor: detectado ? 'rgba(48,209,88,0.1)' : 'var(--c-surface2)',
+                                  color: detectado ? 'var(--c-green)' : 'var(--c-text3)',
+                                }}
+                              >
+                                <span className="text-base">{icon}</span>
+                                <span className="font-medium text-xs flex-1 leading-tight">{label}</span>
+                                {votosContra > 0 && (
+                                  <span className="text-xs opacity-60" title={`${votosContra} reporte${votosContra > 1 ? 's' : ''}`}>
+                                    {votosContra}/3
+                                  </span>
+                                )}
+                                {user && prop.analizado && (
+                                  <button
+                                    onClick={() => handleVotar(key, !detectado)}
+                                    disabled={votando === key}
+                                    title={detectado ? 'Reportar: este criterio NO está presente' : 'Reportar: este criterio SÍ está presente'}
+                                    className="opacity-0 group-hover:opacity-100 transition-opacity ml-0.5 rounded-full p-0.5 flex-shrink-0"
+                                    style={{
+                                      color: yaVote ? (detectado ? '#FF3B30' : '#34C759') : 'var(--c-text3)',
+                                      background: yaVote ? (detectado ? 'rgba(255,59,48,0.1)' : 'rgba(52,199,89,0.1)') : 'transparent',
+                                    }}
+                                  >
+                                    {detectado ? (
+                                      <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                                        <path d="M2.5 2.5l8 8M10.5 2.5l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                                      </svg>
+                                    ) : (
+                                      <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                                        <path d="M6.5 2v9M2 6.5h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                                      </svg>
+                                    )}
+                                  </button>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                        {votoMsg && (
+                          <p className="text-xs text-center py-1 px-2 rounded-lg"
+                            style={{ color: votoMsg.includes('!') ? 'var(--c-green)' : 'var(--c-text2)', background: 'var(--c-surface2)' }}>
+                            {votoMsg}
+                          </p>
+                        )}
+                        {user && prop.analizado && (
+                          <p className="text-xs text-center" style={{ color: 'var(--c-text3)' }}>
+                            Pasá el cursor sobre un criterio para reportar si es incorrecto o falta uno.
+                          </p>
+                        )}
                       </div>
                     )}
 

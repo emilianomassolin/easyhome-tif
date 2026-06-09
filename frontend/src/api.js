@@ -60,3 +60,22 @@ export async function deleteComment(commentId, token) {
   if (!res.ok) throw new Error('Error al eliminar comentario')
   return res.json()
 }
+
+export async function getVotosCriterios(propertyId) {
+  const res = await fetch(`${BASE}/properties/${propertyId}/votos_criterios`)
+  if (!res.ok) return {}
+  return res.json()
+}
+
+export async function votarCriterio(propertyId, criterio, valor, token) {
+  const res = await fetch(`${BASE}/properties/${propertyId}/votar_criterio`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify({ criterio, valor }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || 'Error al votar')
+  }
+  return res.json()
+}

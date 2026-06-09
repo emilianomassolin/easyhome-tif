@@ -68,6 +68,7 @@ class PropertyDetail(BaseModel):
     nivel_accesibilidad: Optional[str] = None
     justificacion_score: Optional[str]
     criterios_detectados: Optional[dict] = None
+    manual_override: Optional[dict] = None
     analizado: bool
     fecha_creacion: datetime
 
@@ -75,6 +76,7 @@ class PropertyDetail(BaseModel):
     def from_orm_with_nivel(cls, obj):
         data = cls.model_validate(obj)
         data.nivel_accesibilidad = _nivel(obj.score_accesibilidad)
+        data.manual_override = obj.manual_override or {}
         criterios = (obj.nlp_resultado or {})
         vision    = (obj.vision_resultado or {})
         if obj.analizado and (criterios or vision):

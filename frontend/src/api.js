@@ -91,3 +91,16 @@ export async function eliminarVotoCriterio(propertyId, criterio, token) {
   }
   return res.json()
 }
+
+export async function adminToggleCriterio(propertyId, newOverride, token) {
+  const res = await fetch(`${BASE}/admin/properties/${propertyId}/accessibility`, {
+    method: 'PATCH',
+    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ override: newOverride }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || 'Error al actualizar criterio')
+  }
+  return res.json()
+}

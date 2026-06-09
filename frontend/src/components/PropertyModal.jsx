@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getProperty, analyzeProperty, getComments, addComment, deleteComment, getVotosCriterios, votarCriterio, eliminarVotoCriterio } from '../api'
+import { getProperty, analyzeProperty, getComments, addComment, deleteComment, getVotosCriterios, votarCriterio, eliminarVotoCriterio, adminToggleCriterio } from '../api'
 import { SCORE_COLOR } from './ScoreBar'
 import { useAuth } from '../context/AuthContext'
 import { authApi } from '../authApi'
@@ -52,6 +52,9 @@ export default function PropertyModal({ id, onClose, onLoginRequired }) {
   const [miVoto, setMiVoto]             = useState({})   // criterio → true/false
   const [votando, setVotando]           = useState(null)  // criterio que está en proceso
   const [votoMsg, setVotoMsg]           = useState('')
+
+  const [adminGuardando, setAdminGuardando] = useState(null)
+  const [adminMsg, setAdminMsg]             = useState('')
 
   useEffect(() => {
     getProperty(id)
@@ -138,6 +141,39 @@ export default function PropertyModal({ id, onClose, onLoginRequired }) {
     } finally {
       setVotando(null)
       setTimeout(() => setVotoMsg(''), 3000)
+    }
+  }
+
+  async function handleAdminToggle(criterio) {
+    if (adminGuardando) return
+    setAdminGuardando(criterio)
+    setAdminMsg('')
+    const currentOverride = prop.manual_override || {}
+    const currentlyDetected = prop.criterios_detectados?.[criterio] ?? false
+
+    let newOverride
+    if (criterio in currentOverride) {
+      // Ya está overrideado → quitarlo (vuelve a la detección automática)
+      newOverride = Object.fromEntries(Object.entries(currentOverride).filter(([k]) => k !== criterio))
+    } else {
+      // No tiene override → agregar con valor opuesto al detectado
+      newOverride = { ...currentOverride, [criterio]: !currentlyDetected }
+    }
+
+    try {
+      const res = await adminToggleCriterio(id, newOverride, token)
+      setProp(prev => ({
+        ...prev,
+        score_accesibilidad: res.score_accesibilidad,
+        criterios_detectados: res.criterios_detectados,
+        manual_override: res.manual_override,
+      }))
+      setAdminMsg(criterio in currentOverride ? 'Override eliminado.' : `Criterio ${!currentlyDetected ? 'activado' : 'desactivado'}.`)
+    } catch (err) {
+      setAdminMsg(`Error: ${err.message}`)
+    } finally {
+      setAdminGuardando(null)
+      setTimeout(() => setAdminMsg(''), 3000)
     }
   }
 
@@ -331,6 +367,52 @@ export default function PropertyModal({ id, onClose, onLoginRequired }) {
                         <div className="grid grid-cols-2 gap-2">
                           {Object.entries(CRITERIOS_LABEL).map(([key, { icon, label }]) => {
                             const detectado = prop.criterios_detectados?.[key]
+                            const isOverridden = key in (prop.manual_override || {})
+                            const isAdmin = user?.is_admin
+
+                            if (isAdmin && prop.analizado) {
+                              // Modo admin: toggle directo, siempre visible
+                              return (
+                                <button
+                                  key={key}
+                                  onClick={() => handleAdminToggle(key)}
+                                  disabled={adminGuardando === key}
+                                  className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-left w-full transition-opacity"
+                                  style={{
+                                    backgroundColor: detectado ? 'rgba(48,209,88,0.1)' : 'var(--c-surface2)',
+                                    color: detectado ? 'var(--c-green)' : 'var(--c-text3)',
+                                    opacity: adminGuardando === key ? 0.5 : 1,
+                                    cursor: 'pointer',
+                                    outline: isOverridden ? '1.5px solid #FF9500' : 'none',
+                                  }}
+                                  title={isOverridden ? 'Override manual activo – clic para restaurar detección automática' : (detectado ? 'Clic para marcar como NO accesible' : 'Clic para marcar como SÍ accesible')}
+                                >
+                                  <span className="text-base">{icon}</span>
+                                  <span className="font-medium text-xs flex-1 leading-tight">{label}</span>
+                                  {isOverridden && (
+                                    <span style={{ color: '#FF9500', fontSize: 10 }} title="Override manual activo">✎</span>
+                                  )}
+                                  <span className="ml-0.5 rounded-full w-5 h-5 flex items-center justify-center flex-shrink-0"
+                                    style={{
+                                      color: detectado ? '#FF3B30' : '#34C759',
+                                      background: detectado ? 'rgba(255,59,48,0.12)' : 'rgba(52,199,89,0.12)',
+                                    }}
+                                  >
+                                    {detectado ? (
+                                      <svg width="11" height="11" viewBox="0 0 13 13" fill="none">
+                                        <path d="M2.5 2.5l8 8M10.5 2.5l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+                                      </svg>
+                                    ) : (
+                                      <svg width="11" height="11" viewBox="0 0 13 13" fill="none">
+                                        <path d="M6.5 2v9M2 6.5h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+                                      </svg>
+                                    )}
+                                  </span>
+                                </button>
+                              )
+                            }
+
+                            // Modo usuario normal: voto comunitario (hover)
                             const votosKey = votos[key] || { true: 0, false: 0 }
                             const yaVote = key in miVoto
                             const votosContra = detectado ? (votosKey.false || 0) : (votosKey.true || 0)
@@ -392,13 +474,24 @@ export default function PropertyModal({ id, onClose, onLoginRequired }) {
                             )
                           })}
                         </div>
+                        {adminMsg && (
+                          <p className="text-xs text-center py-1 px-2 rounded-lg"
+                            style={{ color: 'var(--c-green)', background: 'var(--c-surface2)' }}>
+                            {adminMsg}
+                          </p>
+                        )}
                         {votoMsg && (
                           <p className="text-xs text-center py-1 px-2 rounded-lg"
                             style={{ color: votoMsg.includes('!') ? 'var(--c-green)' : 'var(--c-text2)', background: 'var(--c-surface2)' }}>
                             {votoMsg}
                           </p>
                         )}
-                        {user && prop.analizado && (
+                        {user?.is_admin && prop.analizado && (
+                          <p className="text-xs text-center" style={{ color: 'var(--c-text3)' }}>
+                            Admin: clic para activar/desactivar un criterio directamente. <span style={{color:'#FF9500'}}>✎</span> = override manual activo.
+                          </p>
+                        )}
+                        {user && !user.is_admin && prop.analizado && (
                           <p className="text-xs text-center" style={{ color: 'var(--c-text3)' }}>
                             Pasá el cursor sobre un criterio para reportar si es incorrecto o falta uno.
                           </p>

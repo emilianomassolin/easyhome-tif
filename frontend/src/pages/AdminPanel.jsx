@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { adminApi } from '../adminApi'
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from 'recharts'
 
-const TABS = ['Dashboard', 'Propiedades', 'Reportes', 'Scrapers', 'Análisis', 'Usuarios']
+const TABS = ['Dashboard', 'Propiedades', 'Reportes', 'Scrapers', 'Análisis', 'Usuarios', 'Timeline']
 
-const FUENTES = ['mercadolibre', 'mendozaprop', 'zonaprop', 'argenprop']
+const FUENTES = ['mendozaprop', 'zonaprop', 'argenprop']
 
 const FUENTE_LABEL = {
-  mercadolibre: 'MercadoLibre',
   mendozaprop: 'MendozaProp',
   zonaprop: 'ZonaProp',
   argenprop: 'Argenprop',
@@ -1052,6 +1054,134 @@ function AnalisisTab({ token }) {
   )
 }
 
+// ── Timeline Tab ─────────────────────────────────────────────────────────────
+
+const LINE_COLORS = {
+  venta: '#34C759',
+  alquiler: '#007AFF',
+  null: '#FF9500',
+  undefined: '#FF9500',
+}
+
+function TimelineTab({ token }) {
+  const [data, setData]         = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [fuente, setFuente]     = useState('')
+  const [error, setError]       = useState('')
+
+  useEffect(() => {
+    setLoading(true)
+    adminApi.getTimeline(token, fuente || undefined)
+      .then(rows => {
+        // Pivot: fecha → { fecha, venta, alquiler, ... }
+        const map = {}
+        rows.forEach(r => {
+          const key = r.fecha.slice(0, 16).replace('T', ' ')
+          if (!map[key]) map[key] = { fecha: key }
+          const tipo = r.tipo_operacion || 'sin_tipo'
+          map[key][tipo] = (map[key][tipo] || 0) + r.cantidad
+        })
+        setData(Object.values(map))
+      })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [token, fuente])
+
+  const tipos = [...new Set(data.flatMap(d => Object.keys(d).filter(k => k !== 'fecha')))]
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <h2 className="text-sm font-semibold" style={{ color: 'var(--c-text)' }}>
+            Evolución de propiedades en el tiempo
+          </h2>
+          <select value={fuente} onChange={e => setFuente(e.target.value)} className="apple-select text-xs">
+            <option value="">Todas las fuentes</option>
+            {FUENTES.map(f => <option key={f} value={f}>{FUENTE_LABEL[f]}</option>)}
+          </select>
+        </div>
+
+        {loading ? (
+          <p className="text-sm text-center py-8" style={{ color: 'var(--c-text2)' }}>Cargando...</p>
+        ) : error ? (
+          <p className="text-sm text-center py-8" style={{ color: '#FF3B30' }}>{error}</p>
+        ) : data.length === 0 ? (
+          <div className="text-center py-12 space-y-2">
+            <p className="text-3xl">📊</p>
+            <p className="text-sm font-semibold" style={{ color: 'var(--c-text)' }}>Sin datos todavía</p>
+            <p className="text-xs" style={{ color: 'var(--c-text2)' }}>
+              Los snapshots se generan automáticamente cada vez que se ejecuta un scraper.
+              Corré un scraper desde la pestaña Scrapers para ver el primer punto en el gráfico.
+            </p>
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={320}>
+            <LineChart data={data} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--c-border)" />
+              <XAxis
+                dataKey="fecha"
+                tick={{ fontSize: 10, fill: 'var(--c-text2)' }}
+                tickFormatter={v => v.slice(5, 16)}
+              />
+              <YAxis tick={{ fontSize: 10, fill: 'var(--c-text2)' }} />
+              <Tooltip
+                contentStyle={{ backgroundColor: 'var(--c-surface)', border: '1px solid var(--c-border)', borderRadius: 10, fontSize: 12 }}
+                labelStyle={{ color: 'var(--c-text)', fontWeight: 600 }}
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              {tipos.map(tipo => (
+                <Line
+                  key={tipo}
+                  type="monotone"
+                  dataKey={tipo}
+                  name={tipo === 'venta' ? 'Venta' : tipo === 'alquiler' ? 'Alquiler' : tipo}
+                  stroke={LINE_COLORS[tipo] || '#8884d8'}
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </Card>
+
+      {data.length > 0 && (
+        <Card>
+          <p className="text-xs font-semibold mb-3" style={{ color: 'var(--c-text)' }}>Último snapshot</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr style={{ color: 'var(--c-text2)', borderBottom: '1px solid var(--c-border)' }}>
+                  <th className="text-left py-1 pr-4">Tipo</th>
+                  <th className="text-right py-1">Cantidad</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tipos.map(tipo => {
+                  const last = data[data.length - 1]
+                  return (
+                    <tr key={tipo} style={{ borderBottom: '1px solid var(--c-border)' }}>
+                      <td className="py-1.5 pr-4" style={{ color: 'var(--c-text)' }}>
+                        {tipo === 'venta' ? 'Venta' : tipo === 'alquiler' ? 'Alquiler' : tipo}
+                      </td>
+                      <td className="py-1.5 text-right font-semibold tabular-nums" style={{ color: 'var(--c-text)' }}>
+                        {last[tipo]?.toLocaleString('es-AR') ?? '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+
 // ── Main AdminPanel ───────────────────────────────────────────────────────────
 
 export default function AdminPanel({ onClose, token: userToken }) {
@@ -1110,6 +1240,7 @@ export default function AdminPanel({ onClose, token: userToken }) {
         {activeTab === 'Scrapers'     && <ScrapersTab   token={token} />}
         {activeTab === 'Análisis'     && <AnalisisTab   token={token} />}
         {activeTab === 'Usuarios'     && <UsuariosTab   token={token} />}
+        {activeTab === 'Timeline'     && <TimelineTab   token={token} />}
       </main>
     </div>
   )

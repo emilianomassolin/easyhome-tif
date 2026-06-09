@@ -27,9 +27,25 @@ def get_db():
 
 
 def init_db():
-    from backend.database.models import Property, ScraperLog, Report, User, UserPreferences, Favorite  # noqa: F401
+    from backend.database.models import Property, ScraperLog, Report, User, UserPreferences, Favorite, Comentario, SnapshotPropiedades  # noqa: F401
     Base.metadata.create_all(bind=engine)
     _run_migrations()
+    _fix_stuck_scrapers()
+
+
+def _fix_stuck_scrapers():
+    """Al arrancar, marca como error los scrapers que quedaron en 'running' por un reinicio."""
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        try:
+            conn.execute(text(
+                "UPDATE scraper_logs SET estado='error', fin=NOW(), "
+                "mensaje_error='Proceso interrumpido por reinicio del servidor' "
+                "WHERE estado='running'"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
 
 def _run_migrations():

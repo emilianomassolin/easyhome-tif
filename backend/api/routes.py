@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.database.connection import get_db
-from backend.database.models import Property
+from backend.database.models import Property, Comentario, User
 from backend.nlp.analyzer import analizar_texto
 from backend.vision.image_analyzer import analizar_imagenes
 from backend.scoring.calculator import calcular_score
@@ -272,6 +272,98 @@ def analyze_property(property_id: int, db: Session = Depends(get_db)):
         "titulo": prop.titulo,
         **resultado,
     }
+
+
+# ── Comentarios ───────────────────────────────────────────────────────────────
+
+class ComentarioIn(BaseModel):
+    texto: str
+
+
+@router.get("/properties/{property_id}/comments")
+def get_comments(property_id: int, db: Session = Depends(get_db)):
+    prop = db.query(Property).filter(Property.id == property_id, Property.activa == True).first()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Propiedad no encontrada")
+    comments = (
+        db.query(Comentario, User)
+        .join(User, Comentario.user_id == User.id)
+        .filter(Comentario.property_id == property_id, Comentario.activo == True)
+        .order_by(Comentario.fecha_creacion.desc())
+        .all()
+    )
+    return [
+        {
+            "id": c.id,
+            "texto": c.texto,
+            "fecha_creacion": c.fecha_creacion,
+            "user_nombre": u.nombre or u.email.split("@")[0],
+            "user_id": c.user_id,
+        }
+        for c, u in comments
+    ]
+
+
+@router.post("/properties/{property_id}/comments")
+def add_comment(
+    property_id: int,
+    body: ComentarioIn,
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    from backend.core.security import decode_token
+    auth = request.headers.get("Authorization", "") if request else ""
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Se requiere iniciar sesión para comentar")
+    payload = decode_token(auth[7:])
+    if not payload:
+        raise HTTPException(status_code=401, detail="Token inválido o expirado")
+    user = db.query(User).filter(User.id == int(payload["sub"]), User.activo == True).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="Usuario no encontrado")
+
+    prop = db.query(Property).filter(Property.id == property_id, Property.activa == True).first()
+    if not prop:
+        raise HTTPException(status_code=404, detail="Propiedad no encontrada")
+
+    texto = body.texto.strip()
+    if not texto:
+        raise HTTPException(status_code=400, detail="El comentario no puede estar vacío")
+    if len(texto) > 500:
+        raise HTTPException(status_code=400, detail="El comentario no puede superar 500 caracteres")
+
+    comentario = Comentario(property_id=property_id, user_id=user.id, texto=texto)
+    db.add(comentario)
+    db.commit()
+    db.refresh(comentario)
+    return {
+        "id": comentario.id,
+        "texto": comentario.texto,
+        "fecha_creacion": comentario.fecha_creacion,
+        "user_nombre": user.nombre or user.email.split("@")[0],
+        "user_id": user.id,
+    }
+
+
+@router.delete("/comments/{comment_id}")
+def delete_comment(comment_id: int, db: Session = Depends(get_db), request: Request = None):
+    from backend.core.security import decode_token
+    auth = request.headers.get("Authorization", "") if request else ""
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="No autenticado")
+    payload = decode_token(auth[7:])
+    if not payload:
+        raise HTTPException(status_code=401, detail="Token inválido")
+    user_id = int(payload["sub"])
+
+    comment = db.query(Comentario).filter(Comentario.id == comment_id, Comentario.activo == True).first()
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comentario no encontrado")
+    if comment.user_id != user_id:
+        raise HTTPException(status_code=403, detail="No podés eliminar comentarios de otros usuarios")
+    comment.activo = False
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/scrape/argenprop")

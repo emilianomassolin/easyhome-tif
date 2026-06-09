@@ -1,7 +1,6 @@
 import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from backend.scrapers.mercadolibre_scraper import scrape_mercadolibre
 from backend.scrapers.mendozaprop_scraper import scrape_mendozaprop
 from backend.scrapers.zonaprop_scraper import scrape_zonaprop
 from backend.scrapers.argenprop_scraper import scrape_argenprop
@@ -15,7 +14,6 @@ def _run_all_sources():
     logger.info("=== Iniciando actualización de todas las fuentes ===")
 
     for nombre, funcion in [
-        ("MercadoLibre", scrape_mercadolibre),
         ("MendozaProp",  scrape_mendozaprop),
         ("ZonaProp",     scrape_zonaprop),
         ("Argenprop",    scrape_argenprop),

@@ -113,3 +113,28 @@ class Favorite(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+
+
+class Comentario(Base):
+    __tablename__ = "comentarios"
+
+    id = Column(Integer, primary_key=True, index=True)
+    property_id = Column(Integer, ForeignKey("properties.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    texto = Column(Text, nullable=False)
+    activo = Column(Boolean, default=True, nullable=False)
+    fecha_creacion = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class SnapshotPropiedades(Base):
+    __tablename__ = "snapshots_propiedades"
+
+    id = Column(Integer, primary_key=True, index=True)
+    fecha = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    fuente = Column(String(50), nullable=False)
+    tipo_operacion = Column(String(20), nullable=True)
+    cantidad = Column(Integer, default=0, nullable=False)

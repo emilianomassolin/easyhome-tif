@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getProperty, analyzeProperty } from '../api'
+import { getProperty, analyzeProperty, getComments, addComment, deleteComment } from '../api'
 import { SCORE_COLOR } from './ScoreBar'
 import { useAuth } from '../context/AuthContext'
 import { authApi } from '../authApi'
@@ -44,12 +44,40 @@ export default function PropertyModal({ id, onClose, onLoginRequired }) {
   const [reportSending, setReportSending] = useState(false)
   const [reportMsg, setReportMsg]     = useState('')
 
+  const [comments, setComments]           = useState([])
+  const [commentText, setCommentText]     = useState('')
+  const [commentSending, setCommentSending] = useState(false)
+  const [commentError, setCommentError]   = useState('')
+
   useEffect(() => {
     getProperty(id)
       .then(setProp)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
+    getComments(id).then(setComments).catch(() => {})
   }, [id])
+
+  async function handleAddComment(e) {
+    e.preventDefault()
+    if (!user) { onLoginRequired?.(); return }
+    const texto = commentText.trim()
+    if (!texto) return
+    setCommentSending(true)
+    setCommentError('')
+    try {
+      const nuevo = await addComment(id, texto, token)
+      setComments(prev => [nuevo, ...prev])
+      setCommentText('')
+    } catch (err) { setCommentError(err.message) }
+    finally { setCommentSending(false) }
+  }
+
+  async function handleDeleteComment(commentId) {
+    try {
+      await deleteComment(commentId, token)
+      setComments(prev => prev.filter(c => c.id !== commentId))
+    } catch (err) { setCommentError(err.message) }
+  }
 
   const isFavorite = favoriteIds.has(id)
 
@@ -355,6 +383,74 @@ export default function PropertyModal({ id, onClose, onLoginRequired }) {
                       </form>
                     )}
                   </div>
+                )}
+              </div>
+
+              {/* Comentarios */}
+              <div className="rounded-2xl p-4 space-y-3"
+                style={{ backgroundColor: 'var(--c-surface2)', border: '1px solid var(--c-border)' }}>
+                <p className="text-sm font-semibold" style={{ color: 'var(--c-text)' }}>
+                  💬 Comentarios ({comments.length})
+                </p>
+
+                {user ? (
+                  <form onSubmit={handleAddComment} className="space-y-2">
+                    <textarea
+                      value={commentText}
+                      onChange={e => setCommentText(e.target.value)}
+                      placeholder="¿Qué te pareció esta propiedad?"
+                      rows={2}
+                      maxLength={500}
+                      className="w-full px-3 py-2 rounded-xl text-sm outline-none resize-none"
+                      style={{ backgroundColor: 'var(--c-input-bg)', border: '1px solid var(--c-input-border)', color: 'var(--c-text)' }}
+                    />
+                    {commentError && (
+                      <p className="text-xs" style={{ color: '#FF3B30' }}>{commentError}</p>
+                    )}
+                    <button type="submit" disabled={commentSending || !commentText.trim()}
+                      className="w-full py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+                      style={{ backgroundColor: 'var(--c-blue)' }}>
+                      {commentSending ? 'Enviando…' : 'Comentar'}
+                    </button>
+                  </form>
+                ) : (
+                  <button onClick={() => onLoginRequired?.()}
+                    className="w-full py-2 rounded-xl text-sm font-medium"
+                    style={{ backgroundColor: 'var(--c-surface3)', color: 'var(--c-text2)', border: '1px solid var(--c-border)' }}>
+                    Iniciá sesión para comentar
+                  </button>
+                )}
+
+                {comments.length > 0 ? (
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {comments.map(c => (
+                      <div key={c.id} className="rounded-xl p-3 space-y-1"
+                        style={{ backgroundColor: 'var(--c-surface3)', border: '1px solid var(--c-border)' }}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-semibold" style={{ color: 'var(--c-text)' }}>
+                            {c.user_nombre}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs" style={{ color: 'var(--c-text3)' }}>
+                              {new Date(c.fecha_creacion).toLocaleDateString('es-AR', { day: '2-digit', month: 'short' })}
+                            </span>
+                            {user && c.user_id === user.id && (
+                              <button onClick={() => handleDeleteComment(c.id)}
+                                className="text-xs opacity-60 hover:opacity-100"
+                                style={{ color: '#FF3B30' }} title="Eliminar">
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <p className="text-sm" style={{ color: 'var(--c-text2)' }}>{c.texto}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-center py-2" style={{ color: 'var(--c-text3)' }}>
+                    Todavía no hay comentarios. ¡Sé el primero!
+                  </p>
                 )}
               </div>
 

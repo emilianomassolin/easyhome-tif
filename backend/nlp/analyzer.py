@@ -2,13 +2,16 @@ import json
 import logging
 import os
 
-import anthropic
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+FACU_API_BASE = os.getenv("FACU_API_BASE", "https://ai.cloud.um.edu.ar")
+FACU_API_KEY  = os.getenv("FACU_API_KEY")
+FACU_MODEL    = os.getenv("FACU_MODEL", "gemma4-e2b")
 
 CRITERIOS_NLP = [
     "rampa", "ascensor", "bano_adaptado", "entrada_ancha",
@@ -16,35 +19,14 @@ CRITERIOS_NLP = [
     "pasamanos", "planta_baja",
 ]
 
-PROMPT = """Analizá la siguiente descripción de una propiedad inmobiliaria y detectá si menciona
-características de accesibilidad para personas con movilidad reducida, discapacidad o adultos mayores.
+PROMPT = """Descripción de propiedad: {descripcion}
 
-Descripción:
-{descripcion}
+Detectá si la descripción menciona estas características de accesibilidad. Respondé SOLO con JSON válido:
+{{"rampa":false,"ascensor":false,"bano_adaptado":false,"entrada_ancha":false,"estacionamiento_adaptado":false,"ducha_nivel_piso":false,"pasamanos":false,"planta_baja":false,"confianza":0.5}}
 
-Respondé ÚNICAMENTE con un JSON válido con esta estructura (sin texto adicional):
-{{
-  "rampa": true/false,
-  "ascensor": true/false,
-  "bano_adaptado": true/false,
-  "entrada_ancha": true/false,
-  "estacionamiento_adaptado": true/false,
-  "ducha_nivel_piso": true/false,
-  "pasamanos": true/false,
-  "planta_baja": true/false,
-  "confianza": 0.0-1.0
-}}
+Reglas: rampa=true si menciona rampa. ascensor=true si menciona ascensor/elevador. bano_adaptado=true si menciona baño adaptado/barras de apoyo/ducha accesible. entrada_ancha=true si menciona puerta/entrada ancha. estacionamiento_adaptado=true si menciona cochera/estacionamiento PMD. ducha_nivel_piso=true si menciona ducha italiana/a nivel/sin escalón. pasamanos=true si menciona pasamanos/baranda. planta_baja=true si menciona planta baja/sin escaleras internas. confianza: 0.9 si hay menciones claras, 0.5 si es dudoso, 0.1 si no hay nada.
 
-Criterios:
-- rampa: menciona rampa o rampa de acceso en la entrada
-- ascensor: menciona ascensor o elevador
-- bano_adaptado: menciona baño adaptado, baño para discapacitados, barras de apoyo o ducha accesible
-- entrada_ancha: menciona puerta ancha, entrada amplia o acceso amplio
-- estacionamiento_adaptado: menciona cochera adaptada, estacionamiento PMD o lugar para discapacitados
-- ducha_nivel_piso: menciona ducha a nivel de piso, ducha sin bañera, ducha sin escalón o ducha italiana
-- pasamanos: menciona pasamanos, baranda, barandal o baranda de seguridad en escalera
-- planta_baja: menciona planta baja, piso bajo o sin escaleras internas
-- confianza: qué tan seguro estás de tu análisis (1.0 = muy seguro, 0.0 = sin información)"""
+JSON:"""
 
 
 def analizar_texto(descripcion: str | None) -> dict:
@@ -55,12 +37,18 @@ def analizar_texto(descripcion: str | None) -> dict:
         return vacio
 
     try:
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=400,
-            messages=[{"role": "user", "content": PROMPT.format(descripcion=descripcion)}],
+        resp = requests.post(
+            f"{FACU_API_BASE}/openai/chat/completions",
+            headers={"Authorization": f"Bearer {FACU_API_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": FACU_MODEL,
+                "messages": [{"role": "user", "content": PROMPT.format(descripcion=descripcion)}],
+                "max_tokens": 2000,
+                "temperature": 0,
+            },
+            timeout=20,
         )
-        texto = response.content[0].text.strip()
+        texto = resp.json()["choices"][0]["message"]["content"].strip()
         if texto.startswith("```"):
             texto = texto.split("```")[1]
             if texto.startswith("json"):

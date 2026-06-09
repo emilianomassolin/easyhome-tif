@@ -32,3 +32,31 @@ export async function getStats() {
   if (!res.ok) throw new Error('Error al cargar stats')
   return res.json()
 }
+
+export async function getComments(propertyId) {
+  const res = await fetch(`${BASE}/properties/${propertyId}/comments`)
+  if (!res.ok) throw new Error('Error al cargar comentarios')
+  return res.json()
+}
+
+export async function addComment(propertyId, texto, token) {
+  const res = await fetch(`${BASE}/properties/${propertyId}/comments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify({ texto }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || 'Error al comentar')
+  }
+  return res.json()
+}
+
+export async function deleteComment(commentId, token) {
+  const res = await fetch(`${BASE}/comments/${commentId}`, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${token}` },
+  })
+  if (!res.ok) throw new Error('Error al eliminar comentario')
+  return res.json()
+}

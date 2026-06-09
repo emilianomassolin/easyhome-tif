@@ -73,4 +73,18 @@ export const adminApi = {
   getUsers: (token) => req(token, '/users'),
   setUserStatus: (token, id, activo) =>
     req(token, `/users/${id}/status?activo=${activo}`, { method: 'PATCH' }),
+
+  // Timeline
+  getTimeline: (token, fuente) => {
+    const q = fuente ? `?fuente=${fuente}` : ''
+    return req(token, `/timeline${q}`)
+  },
+
+  // Comentarios (moderación)
+  getComments: (token, params = {}) => {
+    const q = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== '') q.append(k, v) })
+    return req(token, `/comments?${q}`)
+  },
+  deleteComment: (token, id) => req(token, `/comments/${id}`, { method: 'DELETE' }),
 }

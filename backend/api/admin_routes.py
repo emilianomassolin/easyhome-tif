@@ -16,7 +16,7 @@ from sqlalchemy import func, desc, case
 from sqlalchemy.orm import Session
 
 from backend.database.connection import get_db
-from backend.database.models import Property, ScraperLog, Report, User
+from backend.database.models import Property, ScraperLog, Report, User, Comentario, SnapshotPropiedades
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -433,6 +433,27 @@ def _get_scraper_func(fuente: str):
     raise HTTPException(status_code=400, detail=f"Fuente desconocida: {fuente}")
 
 
+def _record_snapshot(db, fuente: str):
+    """Guarda un snapshot de cuántas propiedades activas hay por fuente y tipo_operacion."""
+    from sqlalchemy import func as _func
+    rows = (
+        db.query(Property.tipo_operacion, _func.count(Property.id))
+        .filter(Property.activa == True, Property.fuente == fuente)
+        .group_by(Property.tipo_operacion)
+        .all()
+    )
+    now = datetime.now(timezone.utc)
+    for tipo_operacion, cantidad in rows:
+        snap = SnapshotPropiedades(
+            fecha=now,
+            fuente=fuente,
+            tipo_operacion=tipo_operacion,
+            cantidad=cantidad,
+        )
+        db.add(snap)
+    db.commit()
+
+
 @router.post("/scrapers/{fuente}/run", dependencies=[Depends(require_admin)])
 def run_scraper(fuente: str, db: Session = Depends(get_db)):
     scraper_func = _get_scraper_func(fuente)
@@ -470,6 +491,7 @@ def run_scraper(fuente: str, db: Session = Depends(get_db)):
                 _log.estado = "ok"
                 _log.cantidad = count or 0
                 _db.commit()
+            _record_snapshot(_db, fuente)
             q.put(f"__DONE__{count or 0}")
         except Exception as e:
             _log = _db.query(ScraperLog).filter(ScraperLog.id == log_id).first()
@@ -686,3 +708,64 @@ def update_user_status(user_id: int, activo: bool, db: Session = Depends(get_db)
     user.activo = activo
     db.commit()
     return {"id": user.id, "activo": user.activo}
+
+
+# ── Timeline ──────────────────────────────────────────────────────────────────
+
+@router.get("/timeline", dependencies=[Depends(require_admin)])
+def get_timeline(fuente: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(SnapshotPropiedades).order_by(SnapshotPropiedades.fecha.asc())
+    if fuente:
+        query = query.filter(SnapshotPropiedades.fuente == fuente)
+    snapshots = query.all()
+    return [
+        {
+            "id": s.id,
+            "fecha": s.fecha.isoformat(),
+            "fuente": s.fuente,
+            "tipo_operacion": s.tipo_operacion,
+            "cantidad": s.cantidad,
+        }
+        for s in snapshots
+    ]
+
+
+# ── Comentarios (moderación) ──────────────────────────────────────────────────
+
+@router.get("/comments", dependencies=[Depends(require_admin)])
+def admin_list_comments(
+    property_id: Optional[int] = None,
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+):
+    query = db.query(Comentario, User).join(User, Comentario.user_id == User.id)
+    if property_id:
+        query = query.filter(Comentario.property_id == property_id)
+    total = query.count()
+    items = query.order_by(desc(Comentario.fecha_creacion)).offset(skip).limit(limit).all()
+    return {
+        "total": total,
+        "comentarios": [
+            {
+                "id": c.id,
+                "property_id": c.property_id,
+                "texto": c.texto,
+                "activo": c.activo,
+                "fecha_creacion": c.fecha_creacion.isoformat() if c.fecha_creacion else None,
+                "user_email": u.email,
+                "user_nombre": u.nombre or u.email.split("@")[0],
+            }
+            for c, u in items
+        ],
+    }
+
+
+@router.delete("/comments/{comment_id}", dependencies=[Depends(require_admin)])
+def admin_delete_comment(comment_id: int, db: Session = Depends(get_db)):
+    comment = db.query(Comentario).filter(Comentario.id == comment_id).first()
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comentario no encontrado")
+    comment.activo = False
+    db.commit()
+    return {"ok": True}

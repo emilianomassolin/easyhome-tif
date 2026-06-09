@@ -1,14 +1,9 @@
-import base64
-import hashlib
 import os
-import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
-import requests as _req
-from dotenv import set_key
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -20,16 +15,6 @@ from backend.scoring.calculator import calcular_score
 from backend.nlp.keyword_filter import tiene_keywords_accesibilidad, RESULTADO_VACIO, VISION_VACIA
 
 router = APIRouter()
-
-_REDIRECT_URI = os.getenv("ML_REDIRECT_URI", "http://localhost:8000/auth/callback")
-_pkce_store: dict[str, str] = {}   # state → code_verifier (in-memory, single process)
-
-
-def _pkce_pair() -> tuple[str, str]:
-    verifier = secrets.token_urlsafe(64)
-    digest = hashlib.sha256(verifier.encode()).digest()
-    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
-    return verifier, challenge
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -128,55 +113,6 @@ class AnalysisResponse(BaseModel):
 def health():
     return {"status": "ok"}
 
-
-@router.get("/auth/start", response_class=RedirectResponse)
-def ml_auth_start():
-    state = secrets.token_urlsafe(16)
-    _pkce_store[state] = ""  # placeholder, PKCE not enabled
-
-    app_id = os.getenv("ML_APP_ID", "").strip()
-    url = (
-        f"https://auth.mercadolibre.com.ar/authorization"
-        f"?response_type=code"
-        f"&client_id={app_id}"
-        f"&redirect_uri={_REDIRECT_URI}"
-        f"&state={state}"
-        f"&scope=read+write+offline_access"
-    )
-    return RedirectResponse(url)
-
-
-@router.get("/auth/callback", response_class=HTMLResponse)
-def ml_auth_callback(request: Request, code: str = None, error: str = None, state: str = None):
-    if error or not code:
-        return HTMLResponse(f"<h2>Error: {error or 'sin código'}</h2>", status_code=400)
-
-    env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
-    verifier = _pkce_store.pop(state, None) if state else None
-
-    payload = {
-        "grant_type":    "authorization_code",
-        "client_id":     os.getenv("ML_APP_ID", "").strip(),
-        "client_secret": os.getenv("ML_CLIENT_SECRET", "").strip(),
-        "code":          code,
-        "redirect_uri":  _REDIRECT_URI,
-    }
-    if verifier:
-        payload["code_verifier"] = verifier
-
-    resp = _req.post("https://api.mercadolibre.com/oauth/token", data=payload, timeout=10)
-
-    if resp.status_code != 200:
-        return HTMLResponse(f"<h2>Error al obtener token: {resp.text}</h2>", status_code=400)
-
-    data = resp.json()
-    set_key(env_path, "ML_ACCESS_TOKEN", data["access_token"])
-    os.environ["ML_ACCESS_TOKEN"] = data["access_token"]
-    if "refresh_token" in data:
-        set_key(env_path, "ML_REFRESH_TOKEN", data["refresh_token"])
-        os.environ["ML_REFRESH_TOKEN"] = data["refresh_token"]
-
-    return HTMLResponse("<h2>✅ MercadoLibre autorizado correctamente. Podés cerrar esta ventana.</h2>")
 
 
 @router.get("/stats")

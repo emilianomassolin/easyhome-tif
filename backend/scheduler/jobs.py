@@ -32,7 +32,7 @@ def start_scheduler():
         func=_run_all_sources,
         trigger=IntervalTrigger(hours=24),
         id="fetch_all_sources",
-        name="Fetch MercadoLibre + MendozaProp + ZonaProp + Argenprop cada 24hs",
+        name="Fetch MendozaProp + ZonaProp + Argenprop cada 24hs",
         replace_existing=True,
     )
     scheduler.start()

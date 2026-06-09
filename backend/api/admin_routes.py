@@ -104,7 +104,7 @@ def get_dashboard(db: Session = Depends(get_db)):
 
     # Última ejecución por scraper
     ultimas_ejecuciones = []
-    for fuente in ["mercadolibre", "mendozaprop", "zonaprop", "argenprop"]:
+    for fuente in ["mendozaprop", "zonaprop", "argenprop"]:
         log = (
             db.query(ScraperLog)
             .filter(ScraperLog.fuente == fuente)
@@ -418,9 +418,6 @@ class _QueueHandler(logging.Handler):
 
 
 def _get_scraper_func(fuente: str):
-    if fuente == "mercadolibre":
-        from backend.scrapers.mercadolibre_scraper import scrape_mercadolibre
-        return scrape_mercadolibre
     if fuente == "mendozaprop":
         from backend.scrapers.mendozaprop_scraper import scrape_mendozaprop
         return scrape_mendozaprop

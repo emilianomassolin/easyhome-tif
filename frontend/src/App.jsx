@@ -268,7 +268,7 @@ function AppContent() {
             {[
               { value: tipoPropiedad, onChange: setTipoPropiedad, options: TIPOS_PROPIEDAD.map(t => [t.value, t.label]) },
               { value: zona, onChange: setZona, options: [['', 'Todos los departamentos'], ...ZONAS_MENDOZA.map(z => [z, z])] },
-              { value: fuente, onChange: setFuente, options: [['','Todas las fuentes'],['mercadolibre','MercadoLibre'],['zonaprop','ZonaProp'],['mendozaprop','MendozaProp'],['argenprop','Argenprop']] },
+              { value: fuente, onChange: setFuente, options: [['','Todas las fuentes'],['zonaprop','ZonaProp'],['mendozaprop','MendozaProp'],['argenprop','Argenprop']] },
               { value: minScore, onChange: setMinScore, options: [['','Cualquier score'],['3.5','Parcialmente accesible+'],['6','Accesible+'],['8.5','Muy accesible']] },
             ].map(({ value, onChange, options }, i) => (
               <select key={i} value={value} onChange={e => onChange(e.target.value)} className="apple-select">

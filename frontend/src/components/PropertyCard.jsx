@@ -1,10 +1,9 @@
 import { SCORE_COLOR } from './ScoreBar'
 
 const FUENTE_LABEL = {
-  mercadolibre: 'MercadoLibre',
-  zonaprop:     'ZonaProp',
-  mendozaprop:  'MendozaProp',
-  argenprop:    'Argenprop',
+  zonaprop:    'ZonaProp',
+  mendozaprop: 'MendozaProp',
+  argenprop:   'Argenprop',
 }
 
 export default function PropertyCard({ prop, onClick, isFavorite, onToggleFavorite }) {

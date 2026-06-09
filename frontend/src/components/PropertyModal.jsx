@@ -16,10 +16,9 @@ const CRITERIOS_LABEL = {
 }
 
 const FUENTE_LABEL = {
-  mercadolibre: 'MercadoLibre',
-  zonaprop:     'ZonaProp',
-  mendozaprop:  'MendozaProp',
-  argenprop:    'Argenprop',
+  zonaprop:    'ZonaProp',
+  mendozaprop: 'MendozaProp',
+  argenprop:   'Argenprop',
 }
 
 const MOTIVOS_REPORTE = [

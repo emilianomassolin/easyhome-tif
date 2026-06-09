@@ -472,6 +472,36 @@ def votar_criterio(
     return {"ok": True, "votos": count, "applied": applied}
 
 
+@router.delete("/properties/{property_id}/votos_criterios/{criterio}")
+def eliminar_voto_criterio(
+    property_id: int,
+    criterio: str,
+    db: Session = Depends(get_db),
+    request: Request = None,
+):
+    from backend.core.security import decode_token
+
+    auth = request.headers.get("Authorization", "") if request else ""
+    if not auth.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Se requiere iniciar sesión")
+    payload = decode_token(auth[7:])
+    if not payload:
+        raise HTTPException(status_code=401, detail="Token inválido o expirado")
+    user_id = int(payload["sub"])
+
+    voto = db.query(VotoCriterio).filter(
+        VotoCriterio.property_id == property_id,
+        VotoCriterio.user_id == user_id,
+        VotoCriterio.criterio == criterio,
+    ).first()
+    if not voto:
+        raise HTTPException(status_code=404, detail="No tenés un voto registrado para este criterio")
+
+    db.delete(voto)
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/scrape/argenprop")
 def scrape_argenprop_endpoint(db: Session = Depends(get_db)):
     from backend.scrapers.argenprop_scraper import scrape_argenprop

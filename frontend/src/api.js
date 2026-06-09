@@ -79,3 +79,15 @@ export async function votarCriterio(propertyId, criterio, valor, token) {
   }
   return res.json()
 }
+
+export async function eliminarVotoCriterio(propertyId, criterio, token) {
+  const res = await fetch(`${BASE}/properties/${propertyId}/votos_criterios/${criterio}`, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || 'Error al eliminar voto')
+  }
+  return res.json()
+}

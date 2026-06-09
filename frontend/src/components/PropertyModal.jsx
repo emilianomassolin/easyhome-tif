@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getProperty, analyzeProperty, getComments, addComment, deleteComment, getVotosCriterios, votarCriterio } from '../api'
+import { getProperty, analyzeProperty, getComments, addComment, deleteComment, getVotosCriterios, votarCriterio, eliminarVotoCriterio } from '../api'
 import { SCORE_COLOR } from './ScoreBar'
 import { useAuth } from '../context/AuthContext'
 import { authApi } from '../authApi'
@@ -114,6 +114,31 @@ export default function PropertyModal({ id, onClose, onLoginRequired }) {
     } finally {
       setVotando(null)
       setTimeout(() => setVotoMsg(''), 4000)
+    }
+  }
+
+  async function handleEliminarVoto(criterio) {
+    if (votando) return
+    setVotando(criterio)
+    setVotoMsg('')
+    try {
+      await eliminarVotoCriterio(id, criterio, token)
+      const valorAnterior = miVoto[criterio]
+      setMiVoto(prev => { const n = { ...prev }; delete n[criterio]; return n })
+      setVotos(prev => {
+        const updated = { ...prev }
+        if (updated[criterio]) {
+          const k = String(valorAnterior)
+          updated[criterio] = { ...updated[criterio], [k]: Math.max(0, (updated[criterio][k] || 1) - 1) }
+        }
+        return updated
+      })
+      setVotoMsg('Voto eliminado.')
+    } catch (err) {
+      setVotoMsg(err.message)
+    } finally {
+      setVotando(null)
+      setTimeout(() => setVotoMsg(''), 3000)
     }
   }
 
@@ -327,26 +352,42 @@ export default function PropertyModal({ id, onClose, onLoginRequired }) {
                                   </span>
                                 )}
                                 {user && prop.analizado && (
-                                  <button
-                                    onClick={() => handleVotar(key, !detectado)}
-                                    disabled={votando === key}
-                                    title={detectado ? 'Reportar: este criterio NO está presente' : 'Reportar: este criterio SÍ está presente'}
-                                    className="opacity-0 group-hover:opacity-100 transition-opacity ml-0.5 rounded-full p-0.5 flex-shrink-0"
-                                    style={{
-                                      color: yaVote ? (detectado ? '#FF3B30' : '#34C759') : 'var(--c-text3)',
-                                      background: yaVote ? (detectado ? 'rgba(255,59,48,0.1)' : 'rgba(52,199,89,0.1)') : 'transparent',
-                                    }}
-                                  >
-                                    {detectado ? (
+                                  yaVote ? (
+                                    <button
+                                      onClick={() => handleEliminarVoto(key)}
+                                      disabled={votando === key}
+                                      title="Deshacer mi voto"
+                                      className="ml-0.5 rounded-full p-0.5 flex-shrink-0 transition-opacity"
+                                      style={{
+                                        color: detectado ? '#FF3B30' : '#34C759',
+                                        background: detectado ? 'rgba(255,59,48,0.12)' : 'rgba(52,199,89,0.12)',
+                                        opacity: votando === key ? 0.5 : 1,
+                                      }}
+                                    >
                                       <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                                        <path d="M2.5 2.5l8 8M10.5 2.5l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                                        <path d="M2 6.5C2 4 4 2 6.5 2s4.5 2 4.5 4.5S9 11 6.5 11 2 9 2 6.5z" stroke="currentColor" strokeWidth="1.2"/>
+                                        <path d="M4.5 6.5h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
                                       </svg>
-                                    ) : (
-                                      <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                                        <path d="M6.5 2v9M2 6.5h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                                      </svg>
-                                    )}
-                                  </button>
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => handleVotar(key, !detectado)}
+                                      disabled={votando === key}
+                                      title={detectado ? 'Reportar: este criterio NO está presente' : 'Reportar: este criterio SÍ está presente'}
+                                      className="opacity-0 group-hover:opacity-100 transition-opacity ml-0.5 rounded-full p-0.5 flex-shrink-0"
+                                      style={{ color: 'var(--c-text3)' }}
+                                    >
+                                      {detectado ? (
+                                        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                                          <path d="M2.5 2.5l8 8M10.5 2.5l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                                        </svg>
+                                      ) : (
+                                        <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                                          <path d="M6.5 2v9M2 6.5h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                                        </svg>
+                                      )}
+                                    </button>
+                                  )
                                 )}
                               </div>
                             )

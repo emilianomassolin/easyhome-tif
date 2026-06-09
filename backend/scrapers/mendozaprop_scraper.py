@@ -165,13 +165,23 @@ def scrape_mendozaprop() -> int:
 
     if ids_vistos:
         db = SessionLocal()
-        inactivadas = db.query(Property).filter(
-            Property.fuente == "mendozaprop",
-            ~Property.ml_id.in_(ids_vistos),
-        ).update({"activa": False}, synchronize_session=False)
-        db.commit()
+        activas_actuales = db.query(Property).filter(
+            Property.fuente == "mendozaprop", Property.activa == True
+        ).count()
+        umbral = max(500, int(activas_actuales * 0.3))
+        if len(ids_vistos) >= umbral:
+            inactivadas = db.query(Property).filter(
+                Property.fuente == "mendozaprop",
+                ~Property.ml_id.in_(ids_vistos),
+            ).update({"activa": False}, synchronize_session=False)
+            db.commit()
+            logger.info(f"MendozaProp: {inactivadas} propiedades no vistas marcadas como inactivas.")
+        else:
+            logger.warning(
+                f"MendozaProp: scrape incompleto ({len(ids_vistos)} vistos vs {activas_actuales} activas, "
+                f"umbral {umbral}). No se inactivaron propiedades para evitar pérdida de datos."
+            )
         db.close()
-        logger.info(f"MendozaProp: {inactivadas} propiedades no vistas marcadas como inactivas.")
 
     logger.info(f"MendozaProp: {total_saved} propiedades nuevas/actualizadas.")
     return total_saved

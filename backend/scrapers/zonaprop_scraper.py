@@ -190,13 +190,23 @@ def scrape_zonaprop(max_paginas: int = 600) -> int:
 
     if ids_vistos:
         db = SessionLocal()
-        inactivadas = db.query(Property).filter(
-            Property.fuente == "zonaprop",
-            ~Property.ml_id.in_(ids_vistos),
-        ).update({"activa": False}, synchronize_session=False)
-        db.commit()
+        activas_actuales = db.query(Property).filter(
+            Property.fuente == "zonaprop", Property.activa == True
+        ).count()
+        umbral = max(1000, int(activas_actuales * 0.3))
+        if len(ids_vistos) >= umbral:
+            inactivadas = db.query(Property).filter(
+                Property.fuente == "zonaprop",
+                ~Property.ml_id.in_(ids_vistos),
+            ).update({"activa": False}, synchronize_session=False)
+            db.commit()
+            logger.info(f"ZonaProp: {inactivadas} propiedades no vistas marcadas como inactivas.")
+        else:
+            logger.warning(
+                f"ZonaProp: scrape incompleto ({len(ids_vistos)} vistos vs {activas_actuales} activas, "
+                f"umbral {umbral}). No se inactivaron propiedades para evitar pérdida de datos."
+            )
         db.close()
-        logger.info(f"ZonaProp: {inactivadas} propiedades no vistas marcadas como inactivas.")
 
     logger.info(f"ZonaProp: {total_saved} propiedades totales.")
     return total_saved

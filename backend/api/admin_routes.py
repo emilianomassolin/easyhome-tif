@@ -713,20 +713,42 @@ def update_user_status(user_id: int, activo: bool, db: Session = Depends(get_db)
 # ── Timeline ──────────────────────────────────────────────────────────────────
 
 @router.get("/timeline", dependencies=[Depends(require_admin)])
-def get_timeline(fuente: Optional[str] = None, db: Session = Depends(get_db)):
-    query = db.query(SnapshotPropiedades).order_by(SnapshotPropiedades.fecha.asc())
+def get_timeline(
+    fuente: Optional[str] = None,
+    granularidad: str = "dia",
+    db: Session = Depends(get_db),
+):
+    from sqlalchemy import text as _text, func as _func
+
+    trunc_map = {"dia": "day", "mes": "month", "anio": "year"}
+    trunc = trunc_map.get(granularidad, "day")
+
+    filters = "WHERE 1=1"
+    params: dict = {}
     if fuente:
-        query = query.filter(SnapshotPropiedades.fuente == fuente)
-    snapshots = query.all()
+        filters += " AND fuente = :fuente"
+        params["fuente"] = fuente
+
+    sql = _text(f"""
+        SELECT DATE_TRUNC('{trunc}', fecha) AS periodo,
+               fuente,
+               tipo_operacion,
+               ROUND(AVG(cantidad)) AS cantidad
+        FROM snapshots_propiedades
+        {filters}
+        GROUP BY periodo, fuente, tipo_operacion
+        ORDER BY periodo ASC
+    """)
+
+    rows = db.execute(sql, params).fetchall()
     return [
         {
-            "id": s.id,
-            "fecha": s.fecha.isoformat(),
-            "fuente": s.fuente,
-            "tipo_operacion": s.tipo_operacion,
-            "cantidad": s.cantidad,
+            "fecha": r.periodo.isoformat(),
+            "fuente": r.fuente,
+            "tipo_operacion": r.tipo_operacion,
+            "cantidad": int(r.cantidad),
         }
-        for s in snapshots
+        for r in rows
     ]
 
 

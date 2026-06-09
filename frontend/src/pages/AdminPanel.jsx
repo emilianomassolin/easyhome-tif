@@ -1084,7 +1084,7 @@ function SimpleLineChart({ data, tipos }) {
             const realIdx = data.indexOf(d)
             return (
               <text key={idx} x={xScale(realIdx)} y={innerH + 18} fontSize={9} fill="var(--c-text2)" textAnchor="middle">
-                {d.fecha.slice(5, 16)}
+                {d.fechaLabel || d.fecha.slice(5, 10)}
               </text>
             )
           })}
@@ -1105,7 +1105,7 @@ function SimpleLineChart({ data, tipos }) {
                 cx={xScale(i)} cy={yScale(d[tipo] || 0)} r={3}
                 fill={LINE_COLORS[tipo] || '#8884d8'}
                 style={{ cursor: 'pointer' }}
-                onMouseEnter={() => setTooltip({ x: xScale(i), y: yScale(d[tipo] || 0), label: d.fecha.slice(5, 16), tipo, val: d[tipo] || 0 })}
+                onMouseEnter={() => setTooltip({ x: xScale(i), y: yScale(d[tipo] || 0), label: d.fechaLabel || d.fecha.slice(5, 10), tipo, val: d[tipo] || 0 })}
                 onMouseLeave={() => setTooltip(null)}
               />
             ))
@@ -1149,21 +1149,35 @@ const LINE_COLORS = {
   undefined: '#FF9500',
 }
 
+const GRANULARIDADES = [
+  { key: 'dia',  label: 'Día' },
+  { key: 'mes',  label: 'Mes' },
+  { key: 'anio', label: 'Año' },
+]
+
+function formatFecha(fecha, granularidad) {
+  const d = new Date(fecha)
+  if (granularidad === 'anio') return d.getUTCFullYear().toString()
+  if (granularidad === 'mes') return d.toLocaleDateString('es-AR', { month: 'short', year: 'numeric', timeZone: 'UTC' })
+  return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })
+}
+
 function TimelineTab({ token }) {
-  const [data, setData]         = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [fuente, setFuente]     = useState('')
-  const [error, setError]       = useState('')
+  const [data, setData]               = useState([])
+  const [loading, setLoading]         = useState(true)
+  const [fuente, setFuente]           = useState('')
+  const [granularidad, setGranularidad] = useState('dia')
+  const [error, setError]             = useState('')
 
   useEffect(() => {
     setLoading(true)
-    adminApi.getTimeline(token, fuente || undefined)
+    setError('')
+    adminApi.getTimeline(token, fuente || undefined, granularidad)
       .then(rows => {
-        // Pivot: fecha → { fecha, venta, alquiler, ... }
         const map = {}
         rows.forEach(r => {
-          const key = r.fecha.slice(0, 16).replace('T', ' ')
-          if (!map[key]) map[key] = { fecha: key }
+          const key = r.fecha.slice(0, 10)
+          if (!map[key]) map[key] = { fecha: r.fecha, fechaLabel: formatFecha(r.fecha, granularidad) }
           const tipo = r.tipo_operacion || 'sin_tipo'
           map[key][tipo] = (map[key][tipo] || 0) + r.cantidad
         })
@@ -1171,9 +1185,9 @@ function TimelineTab({ token }) {
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
-  }, [token, fuente])
+  }, [token, fuente, granularidad])
 
-  const tipos = [...new Set(data.flatMap(d => Object.keys(d).filter(k => k !== 'fecha')))]
+  const tipos = [...new Set(data.flatMap(d => Object.keys(d).filter(k => k !== 'fecha' && k !== 'fechaLabel')))]
 
   return (
     <div className="space-y-4">
@@ -1182,10 +1196,29 @@ function TimelineTab({ token }) {
           <h2 className="text-sm font-semibold" style={{ color: 'var(--c-text)' }}>
             Evolución de propiedades en el tiempo
           </h2>
-          <select value={fuente} onChange={e => setFuente(e.target.value)} className="apple-select text-xs">
-            <option value="">Todas las fuentes</option>
-            {FUENTES.map(f => <option key={f} value={f}>{FUENTE_LABEL[f]}</option>)}
-          </select>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Granularity toggle */}
+            <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: 'var(--c-border)' }}>
+              {GRANULARIDADES.map(g => (
+                <button
+                  key={g.key}
+                  onClick={() => setGranularidad(g.key)}
+                  className="px-3 py-1 text-xs font-medium transition-colors"
+                  style={{
+                    background: granularidad === g.key ? 'var(--c-accent)' : 'var(--c-surface2)',
+                    color: granularidad === g.key ? '#fff' : 'var(--c-text2)',
+                    borderRight: '1px solid var(--c-border)',
+                  }}
+                >
+                  {g.label}
+                </button>
+              ))}
+            </div>
+            <select value={fuente} onChange={e => setFuente(e.target.value)} className="apple-select text-xs">
+              <option value="">Todas las fuentes</option>
+              {FUENTES.map(f => <option key={f} value={f}>{FUENTE_LABEL[f]}</option>)}
+            </select>
+          </div>
         </div>
 
         {loading ? (

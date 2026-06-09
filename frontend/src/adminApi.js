@@ -75,9 +75,11 @@ export const adminApi = {
     req(token, `/users/${id}/status?activo=${activo}`, { method: 'PATCH' }),
 
   // Timeline
-  getTimeline: (token, fuente) => {
-    const q = fuente ? `?fuente=${fuente}` : ''
-    return req(token, `/timeline${q}`)
+  getTimeline: (token, fuente, granularidad = 'dia') => {
+    const q = new URLSearchParams()
+    if (fuente) q.append('fuente', fuente)
+    if (granularidad) q.append('granularidad', granularidad)
+    return req(token, `/timeline?${q}`)
   },
 
   // Comentarios (moderación)

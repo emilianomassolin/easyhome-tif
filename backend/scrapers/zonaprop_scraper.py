@@ -1,16 +1,27 @@
 import logging
+import random
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from playwright.sync_api import sync_playwright
+from playwright_stealth import Stealth
+
 from backend.database.connection import SessionLocal
 from backend.database.models import Property
 
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.zonaprop.com.ar"
-
 OPERACIONES = ["venta", "alquiler"]
+
+# User agents reales de Windows/Mac (más comunes que Linux)
+_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+]
 
 
 def _page_url(operacion: str, numero: int) -> str:
@@ -36,6 +47,8 @@ def _extraer_cards(page, operacion: str) -> list[dict]:
     for item in items:
         try:
             data_id = item.get_attribute("data-id")
+            if not data_id:
+                continue
 
             link_el = item.query_selector("a[href*='/propiedades/']")
             if not link_el:
@@ -54,15 +67,15 @@ def _extraer_cards(page, operacion: str) -> list[dict]:
             fotos = [img_el.get_attribute("src")] if img_el else []
 
             propiedades.append({
-                "ml_id":           f"zp-{data_id}",
-                "titulo":          titulo or "Sin título",
-                "precio":          precio,
-                "descripcion":     titulo,
-                "ubicacion":       ubicacion,
-                "permalink_ml":    permalink,
-                "fotos_urls":      fotos,
-                "fuente":          "zonaprop",
-                "tipo_operacion":  operacion,
+                "ml_id":          f"zp-{data_id}",
+                "titulo":         titulo or "Sin título",
+                "precio":         precio,
+                "descripcion":    titulo,
+                "ubicacion":      ubicacion,
+                "permalink_ml":   permalink,
+                "fotos_urls":     fotos,
+                "fuente":         "zonaprop",
+                "tipo_operacion": operacion,
             })
         except Exception as e:
             logger.warning(f"Error parseando card ZonaProp: {e}")
@@ -71,78 +84,97 @@ def _extraer_cards(page, operacion: str) -> list[dict]:
     return propiedades
 
 
-def _scrape_page(browser, operacion: str, numero: int) -> list[dict]:
-    ctx = browser.new_context(
-        user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                   "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        locale="es-AR",
-    )
-    try:
-        page = ctx.new_page()
-        url = _page_url(operacion, numero)
-        page.goto(url, wait_until="domcontentloaded", timeout=60000)
-
-        titulo = page.title()
-        if "moment" in titulo.lower():
-            page.wait_for_timeout(12000)
-        page.wait_for_timeout(4000)
-
-        return _extraer_cards(page, operacion)
-    finally:
-        ctx.close()
-
-
 def _scrape_operacion(operacion: str, max_paginas: int) -> tuple[int, set[str]]:
-    """Scrapes una operación con su propio browser y sesión DB. Pensado para correr en thread."""
+    """Scrapes una operación con sesión persistente + stealth. Corre en thread."""
     db = SessionLocal()
     saved = 0
     ids_vistos: set[str] = set()
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+            ],
+        )
 
-        def _restart_browser():
-            nonlocal browser
-            try:
-                browser.close()
-            except Exception:
-                pass
-            browser = p.chromium.launch(headless=True)
-            logger.info(f"ZonaProp [{operacion}]: browser reiniciado.")
+        # Un solo context por sesión → mantiene cookies y parece usuario real
+        ctx = browser.new_context(
+            user_agent=random.choice(_USER_AGENTS),
+            locale="es-AR",
+            timezone_id="America/Argentina/Mendoza",
+            viewport={"width": random.randint(1280, 1920), "height": random.randint(768, 1080)},
+            extra_http_headers={
+                "Accept-Language": "es-AR,es;q=0.9,en;q=0.8",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "DNT": "1",
+            },
+        )
+
+        stealth = Stealth(navigator_platform_override="Win32")
+        page = ctx.new_page()
+        stealth.apply_stealth_sync(page)  # oculta navigator.webdriver y otros indicadores de bot
 
         try:
             numero = 1
+            consecutive_empty = 0
             consecutive_errors = 0
-            total_restarts = 0
             logger.info(f"ZonaProp scrapeando: {operacion}")
+
+            # Visita la home primero para parecer un usuario que navegó al sitio
+            try:
+                page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30000)
+                time.sleep(random.uniform(1.5, 3.0))
+            except Exception:
+                pass
 
             while True:
                 if max_paginas and numero > max_paginas:
-                    logger.info(f"ZonaProp {operacion}: límite de {max_paginas} páginas alcanzado.")
+                    logger.info(f"ZonaProp {operacion}: límite de {max_paginas} páginas.")
                     break
 
                 try:
-                    items = _scrape_page(browser, operacion, numero)
+                    url = _page_url(operacion, numero)
+                    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+
+                    titulo = page.title().lower()
+                    # ZonaProp muestra "un momento..." cuando detecta bot → esperar más
+                    if "moment" in titulo or "checking" in titulo or "captcha" in titulo:
+                        logger.warning(f"ZonaProp [{operacion}] pág {numero}: challenge detectado, esperando...")
+                        time.sleep(random.uniform(15, 25))
+                        page.reload(wait_until="domcontentloaded", timeout=60000)
+                        time.sleep(random.uniform(5, 8))
+
+                    # Scroll humano para activar lazy-load
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
+                    time.sleep(random.uniform(0.8, 1.5))
+                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    time.sleep(random.uniform(1.0, 2.0))
+
+                    items = _extraer_cards(page, operacion)
                     consecutive_errors = 0
+
                 except Exception as e:
                     consecutive_errors += 1
-                    logger.warning(f"ZonaProp {operacion} pág {numero}: error ({e}). Reintentando ({consecutive_errors}/3)...")
-                    time.sleep(5 * consecutive_errors)
-                    if consecutive_errors >= 3:
-                        if total_restarts >= 3:
-                            logger.error(f"ZonaProp {operacion}: demasiados reinicios. Abandonando.")
-                            break
-                        logger.warning(f"ZonaProp [{operacion}]: reiniciando browser...")
-                        _restart_browser()
-                        consecutive_errors = 0
-                        total_restarts += 1
-                        time.sleep(10)
+                    logger.warning(f"ZonaProp {operacion} pág {numero}: error ({e}). Intento {consecutive_errors}/4")
+                    time.sleep(random.uniform(8, 15) * consecutive_errors)
+                    if consecutive_errors >= 4:
+                        logger.error(f"ZonaProp {operacion}: demasiados errores consecutivos. Parando.")
+                        break
                     continue
 
                 if not items:
-                    logger.info(f"ZonaProp {operacion} pág {numero}: sin resultados. Fin.")
-                    break
+                    consecutive_empty += 1
+                    if consecutive_empty >= 2:
+                        logger.info(f"ZonaProp {operacion} pág {numero}: sin resultados. Fin.")
+                        break
+                    numero += 1
+                    continue
 
+                consecutive_empty = 0
                 logger.info(f"ZonaProp {operacion} pág {numero}: {len(items)} propiedades.")
 
                 for item in items:
@@ -163,9 +195,18 @@ def _scrape_operacion(operacion: str, max_paginas: int) -> tuple[int, set[str]]:
                 db.commit()
                 numero += 1
 
+                # Delay humano entre páginas (más largo cada 10 páginas)
+                if numero % 10 == 0:
+                    pausa = random.uniform(8, 15)
+                    logger.info(f"ZonaProp [{operacion}]: pausa larga ({pausa:.0f}s) en pág {numero}...")
+                    time.sleep(pausa)
+                else:
+                    time.sleep(random.uniform(2.5, 5.0))
+
         except Exception as e:
             logger.error(f"Error inesperado en ZonaProp [{operacion}]: {e}")
         finally:
+            ctx.close()
             browser.close()
 
     db.close()
@@ -204,7 +245,7 @@ def scrape_zonaprop(max_paginas: int = 600) -> int:
         else:
             logger.warning(
                 f"ZonaProp: scrape incompleto ({len(ids_vistos)} vistos vs {activas_actuales} activas, "
-                f"umbral {umbral}). No se inactivaron propiedades para evitar pérdida de datos."
+                f"umbral {umbral}). No se inactivaron propiedades."
             )
         db.close()
 

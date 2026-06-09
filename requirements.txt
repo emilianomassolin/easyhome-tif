@@ -8,6 +8,7 @@ apscheduler>=3.10
 anthropic>=0.25
 beautifulsoup4
 playwright
+playwright-stealth
 pytest
 passlib[bcrypt]
 bcrypt==4.0.1

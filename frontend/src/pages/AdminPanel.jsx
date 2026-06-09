@@ -1,8 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { adminApi } from '../adminApi'
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-} from 'recharts'
 
 const TABS = ['Dashboard', 'Propiedades', 'Reportes', 'Scrapers', 'Análisis', 'Usuarios', 'Timeline']
 
@@ -1054,6 +1051,95 @@ function AnalisisTab({ token }) {
   )
 }
 
+// ── Simple SVG Line Chart ────────────────────────────────────────────────────
+
+function SimpleLineChart({ data, tipos }) {
+  const W = 600, H = 260, PAD = { top: 10, right: 20, bottom: 40, left: 50 }
+  const innerW = W - PAD.left - PAD.right
+  const innerH = H - PAD.top - PAD.bottom
+  const [tooltip, setTooltip] = useState(null)
+
+  const allVals = data.flatMap(d => tipos.map(t => d[t] || 0))
+  const maxVal = Math.max(...allVals, 1)
+
+  const xScale = i => (i / Math.max(data.length - 1, 1)) * innerW
+  const yScale = v => innerH - (v / maxVal) * innerH
+
+  const ticksY = [0, 0.25, 0.5, 0.75, 1].map(f => Math.round(maxVal * f))
+
+  return (
+    <div className="relative w-full overflow-x-auto">
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxHeight: 280 }}>
+        <g transform={`translate(${PAD.left},${PAD.top})`}>
+          {/* Grid lines */}
+          {ticksY.map(v => (
+            <g key={v}>
+              <line x1={0} y1={yScale(v)} x2={innerW} y2={yScale(v)} stroke="var(--c-border)" strokeDasharray="4 4" />
+              <text x={-8} y={yScale(v) + 4} fontSize={9} fill="var(--c-text2)" textAnchor="end">{v.toLocaleString('es-AR')}</text>
+            </g>
+          ))}
+
+          {/* X axis labels */}
+          {data.filter((_, i) => data.length <= 8 || i % Math.ceil(data.length / 6) === 0).map((d, idx) => {
+            const realIdx = data.indexOf(d)
+            return (
+              <text key={idx} x={xScale(realIdx)} y={innerH + 18} fontSize={9} fill="var(--c-text2)" textAnchor="middle">
+                {d.fecha.slice(5, 16)}
+              </text>
+            )
+          })}
+
+          {/* Lines */}
+          {tipos.map(tipo => {
+            const pts = data.map((d, i) => `${xScale(i)},${yScale(d[tipo] || 0)}`).join(' ')
+            return (
+              <polyline key={tipo} points={pts} fill="none"
+                stroke={LINE_COLORS[tipo] || '#8884d8'} strokeWidth={2} strokeLinejoin="round" />
+            )
+          })}
+
+          {/* Dots + tooltip */}
+          {tipos.map(tipo =>
+            data.map((d, i) => (
+              <circle key={`${tipo}-${i}`}
+                cx={xScale(i)} cy={yScale(d[tipo] || 0)} r={3}
+                fill={LINE_COLORS[tipo] || '#8884d8'}
+                style={{ cursor: 'pointer' }}
+                onMouseEnter={() => setTooltip({ x: xScale(i), y: yScale(d[tipo] || 0), label: d.fecha.slice(5, 16), tipo, val: d[tipo] || 0 })}
+                onMouseLeave={() => setTooltip(null)}
+              />
+            ))
+          )}
+
+          {/* Tooltip */}
+          {tooltip && (
+            <g transform={`translate(${tooltip.x + 8},${tooltip.y - 20})`}>
+              <rect x={0} y={0} width={110} height={34} rx={6} fill="var(--c-surface)" stroke="var(--c-border)" />
+              <text x={8} y={14} fontSize={10} fill="var(--c-text)" fontWeight="600">{tooltip.label}</text>
+              <text x={8} y={27} fontSize={10} fill={LINE_COLORS[tooltip.tipo] || '#8884d8'}>
+                {tooltip.tipo === 'venta' ? 'Venta' : tooltip.tipo === 'alquiler' ? 'Alquiler' : tooltip.tipo}: {tooltip.val.toLocaleString('es-AR')}
+              </text>
+            </g>
+          )}
+        </g>
+      </svg>
+
+      {/* Legend */}
+      <div className="flex gap-4 justify-center flex-wrap mt-1">
+        {tipos.map(tipo => (
+          <div key={tipo} className="flex items-center gap-1.5">
+            <div className="w-3 h-0.5 rounded" style={{ backgroundColor: LINE_COLORS[tipo] || '#8884d8' }} />
+            <span className="text-xs" style={{ color: 'var(--c-text2)' }}>
+              {tipo === 'venta' ? 'Venta' : tipo === 'alquiler' ? 'Alquiler' : tipo}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+
 // ── Timeline Tab ─────────────────────────────────────────────────────────────
 
 const LINE_COLORS = {
@@ -1116,34 +1202,7 @@ function TimelineTab({ token }) {
             </p>
           </div>
         ) : (
-          <ResponsiveContainer width="100%" height={320}>
-            <LineChart data={data} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--c-border)" />
-              <XAxis
-                dataKey="fecha"
-                tick={{ fontSize: 10, fill: 'var(--c-text2)' }}
-                tickFormatter={v => v.slice(5, 16)}
-              />
-              <YAxis tick={{ fontSize: 10, fill: 'var(--c-text2)' }} />
-              <Tooltip
-                contentStyle={{ backgroundColor: 'var(--c-surface)', border: '1px solid var(--c-border)', borderRadius: 10, fontSize: 12 }}
-                labelStyle={{ color: 'var(--c-text)', fontWeight: 600 }}
-              />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              {tipos.map(tipo => (
-                <Line
-                  key={tipo}
-                  type="monotone"
-                  dataKey={tipo}
-                  name={tipo === 'venta' ? 'Venta' : tipo === 'alquiler' ? 'Alquiler' : tipo}
-                  stroke={LINE_COLORS[tipo] || '#8884d8'}
-                  strokeWidth={2}
-                  dot={{ r: 3 }}
-                  activeDot={{ r: 5 }}
-                />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
+          <SimpleLineChart data={data} tipos={tipos} />
         )}
       </Card>
 

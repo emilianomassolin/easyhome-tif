@@ -1,11 +1,10 @@
 import logging
-import random
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from playwright.sync_api import sync_playwright
-from playwright_stealth import Stealth
+import requests
+from bs4 import BeautifulSoup
 
 from backend.database.connection import SessionLocal
 from backend.database.models import Property
@@ -14,14 +13,8 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.zonaprop.com.ar"
 OPERACIONES = ["venta", "alquiler"]
-
-# User agents reales de Windows/Mac (más comunes que Linux)
-_USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
-]
+FLARESOLVERR_URL = "http://localhost:8191/v1"
+MAX_TIMEOUT = 60000  # ms
 
 
 def _page_url(operacion: str, numero: int) -> str:
@@ -40,35 +33,59 @@ def _parse_price(texto: str | None) -> float | None:
         return None
 
 
-def _extraer_cards(page, operacion: str) -> list[dict]:
+def _fs_get(session_id: str, url: str, retries: int = 3) -> str | None:
+    """Obtiene HTML de una URL usando FlareSolverr (bypass Cloudflare)."""
+    for intento in range(retries):
+        try:
+            resp = requests.post(
+                FLARESOLVERR_URL,
+                json={"cmd": "request.get", "url": url, "session": session_id, "maxTimeout": MAX_TIMEOUT},
+                timeout=90,
+            )
+            data = resp.json()
+            if data.get("status") == "ok":
+                solution = data.get("solution", {})
+                if solution.get("status") == 200:
+                    return solution.get("response", "")
+                logger.warning(f"FlareSolverr HTTP {solution.get('status')} en {url}")
+            else:
+                logger.warning(f"FlareSolverr error: {data.get('message')} en {url}")
+        except Exception as e:
+            logger.warning(f"FlareSolverr request error (intento {intento+1}): {e}")
+        time.sleep(5 * (intento + 1))
+    return None
+
+
+def _extraer_cards(html: str, operacion: str) -> list[dict]:
+    soup = BeautifulSoup(html, "html.parser")
+    items = soup.find_all(attrs={"data-id": True})
     propiedades = []
-    items = page.query_selector_all("[data-id]")
 
     for item in items:
         try:
-            data_id = item.get_attribute("data-id")
+            data_id = item.get("data-id", "").strip()
             if not data_id:
                 continue
 
-            link_el = item.query_selector("a[href*='/propiedades/']")
+            link_el = item.find("a", href=re.compile(r"/propiedades/"))
             if not link_el:
                 continue
-            href = link_el.get_attribute("href").split("?")[0]
-            permalink = BASE_URL + href
-            titulo = link_el.inner_text().strip()[:200]
+            href = link_el.get("href", "").split("?")[0]
+            permalink = BASE_URL + href if href.startswith("/") else href
+            titulo = link_el.get_text(strip=True)[:200] or "Sin título"
 
-            precio_el = item.query_selector("[class*='Price'], [class*='price']")
-            precio = _parse_price(precio_el.inner_text()) if precio_el else None
+            precio_el = item.find(class_=re.compile(r"[Pp]rice"))
+            precio = _parse_price(precio_el.get_text()) if precio_el else None
 
-            ubic_el = item.query_selector("[class*='Location'], [class*='location'], [class*='address']")
-            ubicacion = ubic_el.inner_text().strip().split("\n")[0][:200] if ubic_el else "Mendoza"
+            ubic_el = item.find(class_=re.compile(r"[Ll]ocation|[Aa]ddress"))
+            ubicacion = ubic_el.get_text(strip=True).split("\n")[0][:200] if ubic_el else "Mendoza"
 
-            img_el = item.query_selector("img[src]")
-            fotos = [img_el.get_attribute("src")] if img_el else []
+            img_el = item.find("img", src=True)
+            fotos = [img_el["src"]] if img_el else []
 
             propiedades.append({
                 "ml_id":          f"zp-{data_id}",
-                "titulo":         titulo or "Sin título",
+                "titulo":         titulo,
                 "precio":         precio,
                 "descripcion":    titulo,
                 "ubicacion":      ubicacion,
@@ -85,137 +102,95 @@ def _extraer_cards(page, operacion: str) -> list[dict]:
 
 
 def _scrape_operacion(operacion: str, max_paginas: int) -> tuple[int, set[str]]:
-    """Scrapes una operación con sesión persistente + stealth. Corre en thread."""
     db = SessionLocal()
     saved = 0
     ids_vistos: set[str] = set()
+    session_id = f"zonaprop_{operacion}"
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-            ],
+    # Crear sesión en FlareSolverr (mantiene cookies entre requests)
+    try:
+        requests.post(
+            FLARESOLVERR_URL,
+            json={"cmd": "sessions.create", "session": session_id},
+            timeout=30,
         )
+    except Exception as e:
+        logger.warning(f"FlareSolverr sessions.create error: {e}")
 
-        # Un solo context por sesión → mantiene cookies y parece usuario real
-        ctx = browser.new_context(
-            user_agent=random.choice(_USER_AGENTS),
-            locale="es-AR",
-            timezone_id="America/Argentina/Mendoza",
-            viewport={"width": random.randint(1280, 1920), "height": random.randint(768, 1080)},
-            extra_http_headers={
-                "Accept-Language": "es-AR,es;q=0.9,en;q=0.8",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                "DNT": "1",
-            },
-        )
+    try:
+        numero = 1
+        consecutive_empty = 0
+        consecutive_errors = 0
+        logger.info(f"ZonaProp scrapeando: {operacion} (via FlareSolverr)")
 
-        stealth = Stealth(navigator_platform_override="Win32")
-        page = ctx.new_page()
-        stealth.apply_stealth_sync(page)  # oculta navigator.webdriver y otros indicadores de bot
+        while True:
+            if max_paginas and numero > max_paginas:
+                logger.info(f"ZonaProp {operacion}: límite de {max_paginas} páginas.")
+                break
 
-        try:
-            numero = 1
-            consecutive_empty = 0
-            consecutive_errors = 0
-            logger.info(f"ZonaProp scrapeando: {operacion}")
+            url = _page_url(operacion, numero)
+            html = _fs_get(session_id, url)
 
-            # Visita la home primero para parecer un usuario que navegó al sitio
-            try:
-                page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30000)
-                time.sleep(random.uniform(1.5, 3.0))
-            except Exception:
-                pass
-
-            while True:
-                if max_paginas and numero > max_paginas:
-                    logger.info(f"ZonaProp {operacion}: límite de {max_paginas} páginas.")
+            if html is None:
+                consecutive_errors += 1
+                logger.warning(f"ZonaProp {operacion} pág {numero}: sin respuesta. Errores: {consecutive_errors}/4")
+                if consecutive_errors >= 4:
+                    logger.error(f"ZonaProp {operacion}: demasiados errores. Parando.")
                     break
+                continue
 
-                try:
-                    url = _page_url(operacion, numero)
-                    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            consecutive_errors = 0
+            items = _extraer_cards(html, operacion)
 
-                    titulo = page.title().lower()
-                    # ZonaProp muestra "un momento..." cuando detecta bot → esperar más
-                    if "moment" in titulo or "checking" in titulo or "captcha" in titulo:
-                        logger.warning(f"ZonaProp [{operacion}] pág {numero}: challenge detectado, esperando...")
-                        time.sleep(random.uniform(15, 25))
-                        page.reload(wait_until="domcontentloaded", timeout=60000)
-                        time.sleep(random.uniform(5, 8))
-
-                    # Scroll humano para activar lazy-load
-                    page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
-                    time.sleep(random.uniform(0.8, 1.5))
-                    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    time.sleep(random.uniform(1.0, 2.0))
-
-                    items = _extraer_cards(page, operacion)
-                    consecutive_errors = 0
-
-                except Exception as e:
-                    consecutive_errors += 1
-                    logger.warning(f"ZonaProp {operacion} pág {numero}: error ({e}). Intento {consecutive_errors}/4")
-                    time.sleep(random.uniform(8, 15) * consecutive_errors)
-                    if consecutive_errors >= 4:
-                        logger.error(f"ZonaProp {operacion}: demasiados errores consecutivos. Parando.")
-                        break
-                    continue
-
-                if not items:
-                    consecutive_empty += 1
-                    if consecutive_empty >= 2:
-                        logger.info(f"ZonaProp {operacion} pág {numero}: sin resultados. Fin.")
-                        break
-                    numero += 1
-                    continue
-
-                consecutive_empty = 0
-                logger.info(f"ZonaProp {operacion} pág {numero}: {len(items)} propiedades.")
-
-                for item in items:
-                    ids_vistos.add(item["ml_id"])
-                    existing = db.query(Property).filter_by(ml_id=item["ml_id"]).first()
-                    if existing:
-                        existing.activa = True
-                        existing.tipo_operacion = operacion
-                        if item.get("precio") and existing.precio != item["precio"]:
-                            existing.precio = item["precio"]
-                        if item.get("descripcion") and existing.descripcion != item["descripcion"]:
-                            existing.descripcion = item["descripcion"]
-                            existing.analizado = False
-                    else:
-                        db.add(Property(**item))
-                    saved += 1
-
-                db.commit()
+            if not items:
+                consecutive_empty += 1
+                if consecutive_empty >= 2:
+                    logger.info(f"ZonaProp {operacion} pág {numero}: sin resultados. Fin.")
+                    break
                 numero += 1
+                continue
 
-                # Delay humano entre páginas (más largo cada 10 páginas)
-                if numero % 10 == 0:
-                    pausa = random.uniform(8, 15)
-                    logger.info(f"ZonaProp [{operacion}]: pausa larga ({pausa:.0f}s) en pág {numero}...")
-                    time.sleep(pausa)
+            consecutive_empty = 0
+            logger.info(f"ZonaProp {operacion} pág {numero}: {len(items)} propiedades.")
+
+            for item in items:
+                ids_vistos.add(item["ml_id"])
+                existing = db.query(Property).filter_by(ml_id=item["ml_id"]).first()
+                if existing:
+                    existing.activa = True
+                    existing.tipo_operacion = operacion
+                    if item.get("precio") and existing.precio != item["precio"]:
+                        existing.precio = item["precio"]
+                    if item.get("descripcion") and existing.descripcion != item["descripcion"]:
+                        existing.descripcion = item["descripcion"]
+                        existing.analizado = False
                 else:
-                    time.sleep(random.uniform(2.5, 5.0))
+                    db.add(Property(**item))
+                saved += 1
 
-        except Exception as e:
-            logger.error(f"Error inesperado en ZonaProp [{operacion}]: {e}")
-        finally:
-            ctx.close()
-            browser.close()
+            db.commit()
+            numero += 1
+            time.sleep(2)
 
-    db.close()
+    except Exception as e:
+        logger.error(f"Error inesperado en ZonaProp [{operacion}]: {e}")
+    finally:
+        db.close()
+        try:
+            requests.post(
+                FLARESOLVERR_URL,
+                json={"cmd": "sessions.destroy", "session": session_id},
+                timeout=10,
+            )
+        except Exception:
+            pass
+
     logger.info(f"ZonaProp {operacion}: {saved} propiedades procesadas.")
     return saved, ids_vistos
 
 
 def scrape_zonaprop(max_paginas: int = 600) -> int:
-    logger.info("Iniciando scraping de ZonaProp (venta + alquiler en paralelo)...")
+    logger.info("Iniciando scraping de ZonaProp (venta + alquiler en paralelo, via FlareSolverr)...")
     total_saved = 0
     ids_vistos: set[str] = set()
 

@@ -366,8 +366,10 @@ export default function PropertyModal({ id, onClose, onLoginRequired }) {
                       <div className="space-y-2">
                         <div className="grid grid-cols-2 gap-2">
                           {Object.entries(CRITERIOS_LABEL).map(([key, { icon, label }]) => {
-                            const detectado = prop.criterios_detectados?.[key]
-                            const isOverridden = key in (prop.manual_override || {})
+                            const override = prop.manual_override || {}
+                            const isOverridden = key in override
+                            // Manual override siempre tiene prioridad sobre la detección automática
+                            const detectado = isOverridden ? override[key] : (prop.criterios_detectados?.[key] ?? false)
                             const isAdmin = user?.is_admin
 
                             if (isAdmin && prop.analizado) {

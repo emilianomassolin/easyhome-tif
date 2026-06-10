@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from backend.database.connection import SessionLocal
 from backend.database.models import Property
+from backend.scrapers.dedup_utils import find_canonical
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +116,7 @@ def _scrape_op_type(op_type: int) -> tuple[int, set[str]]:
                     if fotos and existing.fotos_urls != fotos:
                         existing.fotos_urls = fotos
                 else:
-                    db.add(Property(
+                    new_prop = Property(
                         ml_id=prop_id,
                         titulo=titulo,
                         precio=precio,
@@ -126,7 +127,11 @@ def _scrape_op_type(op_type: int) -> tuple[int, set[str]]:
                         fuente="mendozaprop",
                         tipo_operacion=tipo_op,
                         activa=True,
-                    ))
+                    )
+                    canonical_id = find_canonical(db, ubicacion, precio, tipo_op, "mendozaprop")
+                    if canonical_id:
+                        new_prop.duplicate_of = canonical_id
+                    db.add(new_prop)
                 saved += 1
 
             total_encontradas += len(items)

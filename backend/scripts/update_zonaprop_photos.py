@@ -2,15 +2,23 @@
 Actualiza fotos de ZonaProp existentes con ≤1 foto via FlareSolverr.
 Usa múltiples workers en paralelo para mayor velocidad.
 
-Uso:
-    python -m backend.scripts.update_zonaprop_photos
-    python -m backend.scripts.update_zonaprop_photos --workers 4 --delay 2.0
-    python -m backend.scripts.update_zonaprop_photos --limit 1000 --workers 3
+Uso en VM:
+    cd /opt/easyhome
+    python -m backend.scripts.update_zonaprop_photos --workers 2 --delay 2.0
+
+Uso local (con SSH tunnel al PostgreSQL de la VM en puerto 5433):
+    ssh -L 5433:localhost:5432 ubuntu@10.201.3.235 -N &
+    cd /home/thinkpademi/Documentos/easyhome-tif
+    python -m backend.scripts.update_zonaprop_photos \
+        --workers 8 --delay 1.5 \
+        --flaresolverr http://localhost:8192/v1 \
+        --db postgresql://easyhome_user:easyhome2026@localhost:5433/easyhome \
+        --log update_photos_local.log
 """
 
 import argparse
-import json
 import logging
+import os
 import re
 import sys
 import time
@@ -18,43 +26,50 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from bs4 import BeautifulSoup
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 
-sys.path.insert(0, "/opt/easyhome")
+BASE_URL = "https://www.zonaprop.com.ar"
 
-from backend.database.connection import SessionLocal
-from backend.database.models import Property
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [W%(worker)s] %(levelname)s %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("/opt/easyhome/update_photos.log"),
-    ],
-)
-
-# Logger raíz sin el campo worker (lo agregamos en cada thread)
+# Se configuran en main() según args
+FLARESOLVERR_URL = None
+SessionLocal = None
+SESSION_PREFIX = "zp_photo"
 root_logger = logging.getLogger(__name__)
 
-FLARESOLVERR_URL = "http://localhost:8191/v1"
-BASE_URL = "https://www.zonaprop.com.ar"
+
+def _setup_logging(log_file: str):
+    handlers = [logging.StreamHandler()]
+    if log_file:
+        handlers.append(logging.FileHandler(log_file))
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s")
+    for h in handlers:
+        h.setFormatter(h.formatter or fmt)
+        h.setFormatter(fmt)
+    root_logger.setLevel(logging.INFO)
+    for h in handlers:
+        root_logger.addHandler(h)
+
+
+def _setup_db(db_url: str):
+    global SessionLocal
+    engine = create_engine(db_url, pool_size=10, max_overflow=5)
+    SessionLocal = sessionmaker(bind=engine)
 
 
 def _get_logger(worker_id: int):
     logger = logging.getLogger(f"worker_{worker_id}")
+    logger.setLevel(logging.INFO)
     if not logger.handlers:
-        for h in logging.getLogger(__name__).handlers:
+        for h in root_logger.handlers:
             logger.addHandler(h)
-        logger.setLevel(logging.INFO)
-    logger.worker = worker_id
-    # Patch para incluir worker id en mensajes
-    old_info = logger.info
-    old_warn = logger.warning
-    old_err = logger.error
-    logger.info  = lambda msg, *a, **k: old_info(f"[W{worker_id}] {msg}", *a, **k)
-    logger.warning = lambda msg, *a, **k: old_warn(f"[W{worker_id}] {msg}", *a, **k)
-    logger.error = lambda msg, *a, **k: old_err(f"[W{worker_id}] {msg}", *a, **k)
-    return logger
+    prefix = f"[W{worker_id}]"
+
+    class _Proxy:
+        def info(self, msg):    logger.info(f"{prefix} {msg}")
+        def warning(self, msg): logger.warning(f"{prefix} {msg}")
+        def error(self, msg):   logger.error(f"{prefix} {msg}")
+    return _Proxy()
 
 
 def _fs_create_session(session_id: str):
@@ -93,46 +108,41 @@ def _extraer_fotos(html: str) -> list[str]:
         r"https://imgar\.zonapropcdn\.com/avisos/[^\s\"']+\.jpg(?:\?[^\s\"']*)?",
         html,
     )
-    seen_ids: set[str] = set()
+    seen: set[str] = set()
     result: list[str] = []
     for url in urls:
         base = url.split("?")[0]
         img_id = base.rsplit("/", 1)[-1]
         if "empresas" in url or "logo" in url.lower():
             continue
-        if img_id not in seen_ids:
-            seen_ids.add(img_id)
-            url_norm = re.sub(r"/\d+x\d+/", "/720x532/", base)
-            result.append(url_norm)
+        if img_id not in seen:
+            seen.add(img_id)
+            result.append(re.sub(r"/\d+x\d+/", "/720x532/", base))
     return result[:20]
 
 
 def _extraer_descripcion(html: str) -> str | None:
     soup = BeautifulSoup(html, "html.parser")
-    desc_el = soup.find(class_=re.compile(r"[Dd]escription|[Dd]escripcion|[Dd]etalle"))
-    if desc_el:
-        return desc_el.get_text(separator=" ", strip=True)[:2000]
+    el = soup.find(class_=re.compile(r"[Dd]escription|[Dd]escripcion|[Dd]etalle"))
+    if el:
+        return el.get_text(separator=" ", strip=True)[:2000]
     return None
 
 
-def _worker(worker_id: int, prop_ids: list[int], delay: float) -> tuple[int, int, int]:
-    """Procesa un subconjunto de propiedades. Devuelve (actualizadas, sin_cambio, errores)."""
-    logger = _get_logger(worker_id)
-    session_id = f"zp_photo_w{worker_id}"
+def _worker(worker_id: int, prop_rows: list[tuple], delay: float) -> tuple[int, int, int]:
+    """prop_rows: lista de (id, permalink_ml)"""
+    log = _get_logger(worker_id)
+    session_id = f"{SESSION_PREFIX}_w{worker_id}"
     _fs_create_session(session_id)
-    logger.info(f"Iniciando. {len(prop_ids)} propiedades asignadas.")
+    log.info(f"Iniciando. {len(prop_rows)} propiedades asignadas.")
 
     db = SessionLocal()
     actualizadas = sin_cambio = errores = 0
 
     try:
-        for i, prop_id in enumerate(prop_ids):
-            prop = db.query(Property).filter(Property.id == prop_id).first()
-            if not prop or not prop.permalink_ml:
-                continue
-
+        for i, (prop_id, permalink) in enumerate(prop_rows):
             try:
-                html = _fs_get(session_id, prop.permalink_ml)
+                html = _fs_get(session_id, permalink)
                 if not html:
                     errores += 1
                     time.sleep(delay)
@@ -146,21 +156,28 @@ def _worker(worker_id: int, prop_ids: list[int], delay: float) -> tuple[int, int
 
                 desc = _extraer_descripcion(html)
 
-                prop.fotos_urls = fotos
-                if desc and prop.descripcion != desc:
-                    prop.descripcion = desc
-                    prop.analizado = False
-
+                db.execute(
+                    text("""
+                        UPDATE properties
+                        SET fotos_urls = CAST(:fotos AS jsonb),
+                            descripcion = COALESCE(:desc, descripcion),
+                            analizado = CASE
+                                WHEN :desc IS NOT NULL AND descripcion IS DISTINCT FROM :desc
+                                THEN false ELSE analizado END
+                        WHERE id = :id
+                    """),
+                    {"fotos": __import__("json").dumps(fotos), "desc": desc, "id": prop_id},
+                )
                 db.commit()
                 actualizadas += 1
 
                 if (i + 1) % 50 == 0:
-                    logger.info(f"Progreso: {i+1}/{len(prop_ids)} — {actualizadas} actualizadas, {errores} errores")
+                    log.info(f"Progreso: {i+1}/{len(prop_rows)} — {actualizadas} actualizadas, {errores} errores")
 
                 time.sleep(delay)
 
             except Exception as e:
-                logger.error(f"Error en prop {prop_id}: {e}")
+                log.error(f"Error en prop {prop_id}: {e}")
                 errores += 1
                 db.rollback()
                 time.sleep(delay * 2)
@@ -169,16 +186,40 @@ def _worker(worker_id: int, prop_ids: list[int], delay: float) -> tuple[int, int
         db.close()
         _fs_destroy_session(session_id)
 
-    logger.info(f"Finalizado: {actualizadas} actualizadas, {sin_cambio} sin cambio, {errores} errores")
+    log.info(f"Finalizado: {actualizadas} actualizadas, {sin_cambio} sin cambio, {errores} errores")
     return actualizadas, sin_cambio, errores
 
 
-def main(limit: int | None, workers: int, delay: float):
-    from sqlalchemy import text
+def main():
+    global FLARESOLVERR_URL, SESSION_PREFIX
+
+    parser = argparse.ArgumentParser(description="Actualiza fotos ZonaProp vía FlareSolverr")
+    parser.add_argument("--workers",        type=int,   default=4,
+                        help="Workers paralelos (default: 4)")
+    parser.add_argument("--delay",          type=float, default=2.0,
+                        help="Segundos entre requests por worker (default: 2.0)")
+    parser.add_argument("--limit",          type=int,   default=None,
+                        help="Máx propiedades a procesar (default: todas)")
+    parser.add_argument("--flaresolverr",   type=str,   default="http://localhost:8191/v1",
+                        help="URL de FlareSolverr (default: http://localhost:8191/v1)")
+    parser.add_argument("--db",             type=str,
+                        default=os.getenv("DATABASE_URL", "postgresql://easyhome_user:easyhome2026@localhost:5432/easyhome"),
+                        help="URL de PostgreSQL")
+    parser.add_argument("--log",            type=str,   default=None,
+                        help="Archivo de log (default: solo consola)")
+    parser.add_argument("--session-prefix", type=str,   default="zp_photo",
+                        help="Prefijo de sesiones FlareSolverr (default: zp_photo)")
+    args = parser.parse_args()
+
+    FLARESOLVERR_URL = args.flaresolverr
+    SESSION_PREFIX = args.session_prefix
+    _setup_logging(args.log)
+    _setup_db(args.db)
+
     db = SessionLocal()
     rows = db.execute(
         text("""
-            SELECT id FROM properties
+            SELECT id, permalink_ml FROM properties
             WHERE fuente = 'zonaprop'
               AND activa = true
               AND permalink_ml IS NOT NULL
@@ -186,24 +227,27 @@ def main(limit: int | None, workers: int, delay: float):
             ORDER BY id
             LIMIT :lim
         """),
-        {"lim": limit or 999999},
+        {"lim": args.limit or 999999},
     ).fetchall()
     db.close()
 
-    prop_ids = [r[0] for r in rows]
-    total = len(prop_ids)
-    root_logger.info(f"Total propiedades a procesar: {total} | Workers: {workers} | Delay: {delay}s")
+    total = len(rows)
+    root_logger.info(
+        f"Total: {total} props | Workers: {args.workers} | "
+        f"Delay: {args.delay}s | FS: {FLARESOLVERR_URL} | DB: {args.db[:40]}..."
+    )
 
     if total == 0:
         root_logger.info("Nada que procesar.")
         return
 
-    # Repartir IDs entre workers en round-robin para balancear carga
-    chunks = [prop_ids[i::workers] for i in range(workers)]
+    # Repartir en round-robin entre workers
+    chunks = [list(rows[i::args.workers]) for i in range(args.workers)]
 
     total_act = total_sin = total_err = 0
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {executor.submit(_worker, i, chunk, delay): i for i, chunk in enumerate(chunks)}
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        futures = {executor.submit(_worker, i, chunk, args.delay): i
+                   for i, chunk in enumerate(chunks) if chunk}
         for future in as_completed(futures):
             act, sin, err = future.result()
             total_act += act
@@ -211,18 +255,10 @@ def main(limit: int | None, workers: int, delay: float):
             total_err += err
 
     root_logger.info(
-        f"\n=== COMPLETADO ===\n"
-        f"  Procesadas:  {total}\n"
-        f"  Actualizadas: {total_act}\n"
-        f"  Sin cambio:   {total_sin}\n"
-        f"  Errores:      {total_err}"
+        f"\n=== COMPLETADO === "
+        f"Actualizadas: {total_act} | Sin cambio: {total_sin} | Errores: {total_err}"
     )
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--workers",  type=int,   default=4,   help="Workers paralelos (default: 4)")
-    parser.add_argument("--delay",    type=float, default=2.0, help="Segundos entre requests por worker (default: 2.0)")
-    parser.add_argument("--limit",    type=int,   default=None, help="Máx propiedades a procesar")
-    args = parser.parse_args()
-    main(limit=args.limit, workers=args.workers, delay=args.delay)
+    main()

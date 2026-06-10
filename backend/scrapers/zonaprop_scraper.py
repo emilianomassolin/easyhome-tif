@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 
 from backend.database.connection import SessionLocal
 from backend.database.models import Property
+from backend.scrapers.dedup_utils import find_canonical
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +208,17 @@ def _scrape_operacion(operacion: str, max_paginas: int) -> tuple[int, set[str]]:
                                 if len(texto) > len(item.get("descripcion", "")):
                                     item["descripcion"] = texto[:2000]
                         time.sleep(1.5)
-                    db.add(Property(**item))
+                    new_prop = Property(**item)
+                    canonical_id = find_canonical(
+                        db,
+                        ubicacion=item.get("ubicacion", ""),
+                        precio=item.get("precio"),
+                        tipo_operacion=operacion,
+                        fuente="zonaprop",
+                    )
+                    if canonical_id:
+                        new_prop.duplicate_of = canonical_id
+                    db.add(new_prop)
                 saved += 1
 
             db.commit()

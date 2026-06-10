@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 
 from backend.database.connection import SessionLocal
 from backend.database.models import Property
+from backend.scrapers.dedup_utils import find_canonical
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +206,7 @@ def _save_cards(db, cards: list[dict], fetch_detail: bool = True) -> int:
             if "mendoza" not in ubicacion.lower():
                 ubicacion = f"{ubicacion}, Mendoza"
 
-            db.add(Property(
+            new_prop = Property(
                 ml_id        = card["ml_id"],
                 titulo       = card["titulo"],
                 precio       = card["precio"],
@@ -216,7 +217,11 @@ def _save_cards(db, cards: list[dict], fetch_detail: bool = True) -> int:
                 fuente       = "argenprop",
                 tipo_operacion = card["tipo_op"],
                 activa       = True,
-            ))
+            )
+            canonical_id = find_canonical(db, ubicacion, card["precio"], card["tipo_op"], "argenprop")
+            if canonical_id:
+                new_prop.duplicate_of = canonical_id
+            db.add(new_prop)
             saved += 1
 
     db.commit()

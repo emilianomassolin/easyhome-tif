@@ -119,7 +119,10 @@ def health():
 
 @router.get("/stats")
 def get_stats(db: Session = Depends(get_db)):
-    total = db.query(Property).filter(Property.activa == True).count()
+    total = db.query(Property).filter(
+        Property.activa == True,
+        Property.duplicate_of == None,
+    ).count()
     con_accesibilidad = db.query(Property).filter(
         Property.activa == True,
         Property.analizado == True,
@@ -143,7 +146,10 @@ def list_properties(
     db: Session = Depends(get_db),
 ):
     from sqlalchemy import nullslast, nullsfirst, desc, asc, or_
-    query = db.query(Property).filter(Property.activa == True)
+    query = db.query(Property).filter(
+        Property.activa == True,
+        Property.duplicate_of == None,
+    )
     if fuente:
         query = query.filter(Property.fuente == fuente)
     if min_score is not None:

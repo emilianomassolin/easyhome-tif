@@ -56,6 +56,30 @@ def _fs_get(session_id: str, url: str, retries: int = 3) -> str | None:
     return None
 
 
+def _extraer_fotos_detalle(html: str) -> list[str]:
+    """Extrae todas las URLs de fotos de la página de detalle de ZonaProp."""
+    # Buscar imágenes de imgar.zonapropcdn.com/avisos en tamaño 720x532 o 1200x1200
+    urls = re.findall(
+        r"https://imgar\.zonapropcdn\.com/avisos/[^\s\"']+\.jpg(?:\?[^\s\"']*)?",
+        html,
+    )
+    # Deduplicar por ID de imagen (último segmento antes de ?)
+    seen_ids: set[str] = set()
+    result: list[str] = []
+    for url in urls:
+        base = url.split("?")[0]
+        img_id = base.rsplit("/", 1)[-1]
+        # Preferir 720x532 sobre 360x266; excluir logos de empresa
+        if "empresas" in url or "logo" in url.lower():
+            continue
+        if img_id not in seen_ids:
+            seen_ids.add(img_id)
+            # Normalizar a 720x532 para consistencia
+            url_norm = re.sub(r"/\d+x\d+/", "/720x532/", base)
+            result.append(url_norm)
+    return result[:20]
+
+
 def _extraer_cards(html: str, operacion: str) -> list[dict]:
     soup = BeautifulSoup(html, "html.parser")
     items = soup.find_all(attrs={"data-id": True})
@@ -81,7 +105,7 @@ def _extraer_cards(html: str, operacion: str) -> list[dict]:
             ubicacion = ubic_el.get_text(strip=True).split("\n")[0][:200] if ubic_el else "Mendoza"
 
             img_el = item.find("img", src=True)
-            fotos = [img_el["src"]] if img_el else []
+            foto_thumb = img_el["src"] if img_el else None
 
             propiedades.append({
                 "ml_id":          f"zp-{data_id}",
@@ -90,7 +114,8 @@ def _extraer_cards(html: str, operacion: str) -> list[dict]:
                 "descripcion":    titulo,
                 "ubicacion":      ubicacion,
                 "permalink_ml":   permalink,
-                "fotos_urls":     fotos,
+                "fotos_urls":     [foto_thumb] if foto_thumb else [],
+                "href":           href,  # para visitar detalle
                 "fuente":         "zonaprop",
                 "tipo_operacion": operacion,
             })
@@ -155,6 +180,7 @@ def _scrape_operacion(operacion: str, max_paginas: int) -> tuple[int, set[str]]:
 
             for item in items:
                 ids_vistos.add(item["ml_id"])
+                href = item.pop("href", None)  # no es columna del modelo
                 existing = db.query(Property).filter_by(ml_id=item["ml_id"]).first()
                 if existing:
                     existing.activa = True
@@ -165,6 +191,22 @@ def _scrape_operacion(operacion: str, max_paginas: int) -> tuple[int, set[str]]:
                         existing.descripcion = item["descripcion"]
                         existing.analizado = False
                 else:
+                    # Propiedad nueva → visitar detalle para obtener todas las fotos y descripción
+                    if href:
+                        detail_url = BASE_URL + href if href.startswith("/") else href
+                        detail_html = _fs_get(session_id, detail_url)
+                        if detail_html:
+                            fotos_detalle = _extraer_fotos_detalle(detail_html)
+                            if fotos_detalle:
+                                item["fotos_urls"] = fotos_detalle
+                            # Extraer descripción del detalle
+                            soup_det = BeautifulSoup(detail_html, "html.parser")
+                            desc_el = soup_det.find(class_=re.compile(r"[Dd]escription|[Dd]escripcion|[Dd]etalle"))
+                            if desc_el:
+                                texto = desc_el.get_text(separator=" ", strip=True)
+                                if len(texto) > len(item.get("descripcion", "")):
+                                    item["descripcion"] = texto[:2000]
+                        time.sleep(1.5)
                     db.add(Property(**item))
                 saved += 1
 

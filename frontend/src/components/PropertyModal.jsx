@@ -252,9 +252,9 @@ export default function PropertyModal({ id, onClose, onLoginRequired }) {
         {prop && !loading && (
           <>
             {/* Galería */}
-            <div className="relative overflow-hidden group" style={{ height: 280, borderRadius: '24px 24px 0 0' }}>
+            <div className="relative overflow-hidden group" style={{ aspectRatio: '16/9', borderRadius: '24px 24px 0 0', backgroundColor: '#111' }}>
               {prop.fotos_urls?.length > 0 ? (
-                <img src={prop.fotos_urls[fotoIdx]} alt={prop.titulo} className="w-full h-full object-cover" />
+                <img src={prop.fotos_urls[fotoIdx]} alt={prop.titulo} className="w-full h-full object-contain" />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-6xl"
                   style={{ backgroundColor: 'var(--c-surface2)' }}>🏠</div>

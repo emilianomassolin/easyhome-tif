@@ -1,22 +1,23 @@
 """
-Actualiza las fotos de propiedades ZonaProp existentes que solo tienen 1 foto.
-Visita cada página de detalle via FlareSolverr y extrae todas las imágenes.
+Actualiza fotos de ZonaProp existentes con ≤1 foto via FlareSolverr.
+Usa múltiples workers en paralelo para mayor velocidad.
 
 Uso:
     python -m backend.scripts.update_zonaprop_photos
-    python -m backend.scripts.update_zonaprop_photos --limit 500
-    python -m backend.scripts.update_zonaprop_photos --batch-size 50 --delay 2.0
+    python -m backend.scripts.update_zonaprop_photos --workers 4 --delay 2.0
+    python -m backend.scripts.update_zonaprop_photos --limit 1000 --workers 3
 """
 
 import argparse
+import json
 import logging
 import re
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from bs4 import BeautifulSoup
-from sqlalchemy import and_
 
 sys.path.insert(0, "/opt/easyhome")
 
@@ -25,34 +26,65 @@ from backend.database.models import Property
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
+    format="%(asctime)s [W%(worker)s] %(levelname)s %(message)s",
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler("/opt/easyhome/update_photos.log"),
     ],
 )
-logger = logging.getLogger(__name__)
+
+# Logger raíz sin el campo worker (lo agregamos en cada thread)
+root_logger = logging.getLogger(__name__)
 
 FLARESOLVERR_URL = "http://localhost:8191/v1"
 BASE_URL = "https://www.zonaprop.com.ar"
-SESSION_ID = "zp_photo_update"
 
 
-def _fs_get(url: str, retries: int = 3) -> str | None:
+def _get_logger(worker_id: int):
+    logger = logging.getLogger(f"worker_{worker_id}")
+    if not logger.handlers:
+        for h in logging.getLogger(__name__).handlers:
+            logger.addHandler(h)
+        logger.setLevel(logging.INFO)
+    logger.worker = worker_id
+    # Patch para incluir worker id en mensajes
+    old_info = logger.info
+    old_warn = logger.warning
+    old_err = logger.error
+    logger.info  = lambda msg, *a, **k: old_info(f"[W{worker_id}] {msg}", *a, **k)
+    logger.warning = lambda msg, *a, **k: old_warn(f"[W{worker_id}] {msg}", *a, **k)
+    logger.error = lambda msg, *a, **k: old_err(f"[W{worker_id}] {msg}", *a, **k)
+    return logger
+
+
+def _fs_create_session(session_id: str):
+    try:
+        requests.post(FLARESOLVERR_URL, json={"cmd": "sessions.create", "session": session_id}, timeout=30)
+    except Exception:
+        pass
+
+
+def _fs_destroy_session(session_id: str):
+    try:
+        requests.post(FLARESOLVERR_URL, json={"cmd": "sessions.destroy", "session": session_id}, timeout=10)
+    except Exception:
+        pass
+
+
+def _fs_get(session_id: str, url: str, retries: int = 3) -> str | None:
     for intento in range(retries):
         try:
             resp = requests.post(
                 FLARESOLVERR_URL,
-                json={"cmd": "request.get", "url": url, "session": SESSION_ID, "maxTimeout": 60000},
+                json={"cmd": "request.get", "url": url, "session": session_id, "maxTimeout": 60000},
                 timeout=90,
             )
             data = resp.json()
             if data.get("status") == "ok" and data.get("solution", {}).get("status") == 200:
                 return data["solution"]["response"]
-            logger.warning(f"FlareSolverr error en {url}: {data.get('message') or data.get('solution',{}).get('status')}")
-        except Exception as e:
-            logger.warning(f"Request error (intento {intento+1}): {e}")
-        time.sleep(5 * (intento + 1))
+        except Exception:
+            pass
+        time.sleep(4 * (intento + 1))
     return None
 
 
@@ -83,35 +115,70 @@ def _extraer_descripcion(html: str) -> str | None:
     return None
 
 
-def main(limit: int | None, batch_size: int, delay: float):
-    # Crear sesión FlareSolverr
-    try:
-        requests.post(FLARESOLVERR_URL, json={"cmd": "sessions.create", "session": SESSION_ID}, timeout=30)
-        logger.info("Sesión FlareSolverr creada.")
-    except Exception as e:
-        logger.error(f"No se pudo crear sesión FlareSolverr: {e}")
-        return
+def _worker(worker_id: int, prop_ids: list[int], delay: float) -> tuple[int, int, int]:
+    """Procesa un subconjunto de propiedades. Devuelve (actualizadas, sin_cambio, errores)."""
+    logger = _get_logger(worker_id)
+    session_id = f"zp_photo_w{worker_id}"
+    _fs_create_session(session_id)
+    logger.info(f"Iniciando. {len(prop_ids)} propiedades asignadas.")
 
     db = SessionLocal()
+    actualizadas = sin_cambio = errores = 0
 
-    # Propiedades ZonaProp activas con solo 1 foto o sin fotos
-    query = db.query(Property).filter(
-        and_(
-            Property.fuente == "zonaprop",
-            Property.activa == True,
-            Property.permalink_ml.isnot(None),
-        )
-    )
-    # Filtrar las que tienen 1 o 0 fotos (jsonb array length)
-    from sqlalchemy import func, cast
-    from sqlalchemy.dialects.postgresql import JSONB
+    try:
+        for i, prop_id in enumerate(prop_ids):
+            prop = db.query(Property).filter(Property.id == prop_id).first()
+            if not prop or not prop.permalink_ml:
+                continue
+
+            try:
+                html = _fs_get(session_id, prop.permalink_ml)
+                if not html:
+                    errores += 1
+                    time.sleep(delay)
+                    continue
+
+                fotos = _extraer_fotos(html)
+                if len(fotos) <= 1:
+                    sin_cambio += 1
+                    time.sleep(delay)
+                    continue
+
+                desc = _extraer_descripcion(html)
+
+                prop.fotos_urls = fotos
+                if desc and prop.descripcion != desc:
+                    prop.descripcion = desc
+                    prop.analizado = False
+
+                db.commit()
+                actualizadas += 1
+
+                if (i + 1) % 50 == 0:
+                    logger.info(f"Progreso: {i+1}/{len(prop_ids)} — {actualizadas} actualizadas, {errores} errores")
+
+                time.sleep(delay)
+
+            except Exception as e:
+                logger.error(f"Error en prop {prop_id}: {e}")
+                errores += 1
+                db.rollback()
+                time.sleep(delay * 2)
+
+    finally:
+        db.close()
+        _fs_destroy_session(session_id)
+
+    logger.info(f"Finalizado: {actualizadas} actualizadas, {sin_cambio} sin cambio, {errores} errores")
+    return actualizadas, sin_cambio, errores
+
+
+def main(limit: int | None, workers: int, delay: float):
     from sqlalchemy import text
-
-    # Usar SQL raw para filtrar por longitud del array JSONB
-    props = db.execute(
+    db = SessionLocal()
+    rows = db.execute(
         text("""
-            SELECT id, permalink_ml, fotos_urls
-            FROM properties
+            SELECT id FROM properties
             WHERE fuente = 'zonaprop'
               AND activa = true
               AND permalink_ml IS NOT NULL
@@ -121,85 +188,41 @@ def main(limit: int | None, batch_size: int, delay: float):
         """),
         {"lim": limit or 999999},
     ).fetchall()
-
-    total = len(props)
-    logger.info(f"Propiedades a actualizar: {total}")
-
-    actualizadas = 0
-    sin_cambio = 0
-    errores = 0
-
-    for i, row in enumerate(props):
-        prop_id, permalink, _ = row
-
-        try:
-            html = _fs_get(permalink)
-            if not html:
-                logger.warning(f"[{i+1}/{total}] Sin respuesta para {permalink}")
-                errores += 1
-                continue
-
-            fotos = _extraer_fotos(html)
-
-            if len(fotos) <= 1:
-                sin_cambio += 1
-                logger.debug(f"[{i+1}/{total}] ID {prop_id}: solo {len(fotos)} foto(s) en detalle.")
-                time.sleep(delay)
-                continue
-
-            desc = _extraer_descripcion(html)
-
-            db.execute(
-                text("""
-                    UPDATE properties
-                    SET fotos_urls = CAST(:fotos AS jsonb),
-                        descripcion = COALESCE(:desc, descripcion),
-                        analizado = CASE WHEN :desc IS NOT NULL AND descripcion IS DISTINCT FROM :desc THEN false ELSE analizado END
-                    WHERE id = :id
-                """),
-                {
-                    "fotos": __import__("json").dumps(fotos),
-                    "desc": desc,
-                    "id": prop_id,
-                },
-            )
-            actualizadas += 1
-
-            if actualizadas % batch_size == 0:
-                db.commit()
-                logger.info(f"  Progreso: {i+1}/{total} procesadas, {actualizadas} actualizadas, {errores} errores.")
-
-            time.sleep(delay)
-
-        except Exception as e:
-            logger.error(f"[{i+1}/{total}] Error en ID {prop_id}: {e}")
-            errores += 1
-            db.rollback()
-            time.sleep(delay * 2)
-
-    db.commit()
     db.close()
 
-    logger.info(
-        f"\n=== Finalizado ===\n"
-        f"  Total procesadas: {total}\n"
-        f"  Actualizadas con más fotos: {actualizadas}\n"
-        f"  Sin cambio (1 foto en detalle): {sin_cambio}\n"
-        f"  Errores: {errores}"
-    )
+    prop_ids = [r[0] for r in rows]
+    total = len(prop_ids)
+    root_logger.info(f"Total propiedades a procesar: {total} | Workers: {workers} | Delay: {delay}s")
 
-    # Destruir sesión
-    try:
-        requests.post(FLARESOLVERR_URL, json={"cmd": "sessions.destroy", "session": SESSION_ID}, timeout=10)
-    except Exception:
-        pass
+    if total == 0:
+        root_logger.info("Nada que procesar.")
+        return
+
+    # Repartir IDs entre workers en round-robin para balancear carga
+    chunks = [prop_ids[i::workers] for i in range(workers)]
+
+    total_act = total_sin = total_err = 0
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(_worker, i, chunk, delay): i for i, chunk in enumerate(chunks)}
+        for future in as_completed(futures):
+            act, sin, err = future.result()
+            total_act += act
+            total_sin += sin
+            total_err += err
+
+    root_logger.info(
+        f"\n=== COMPLETADO ===\n"
+        f"  Procesadas:  {total}\n"
+        f"  Actualizadas: {total_act}\n"
+        f"  Sin cambio:   {total_sin}\n"
+        f"  Errores:      {total_err}"
+    )
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Actualiza fotos ZonaProp vía FlareSolverr")
-    parser.add_argument("--limit", type=int, default=None, help="Máximo de propiedades a procesar")
-    parser.add_argument("--batch-size", type=int, default=50, help="Commit cada N propiedades (default: 50)")
-    parser.add_argument("--delay", type=float, default=2.0, help="Segundos entre requests (default: 2.0)")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workers",  type=int,   default=4,   help="Workers paralelos (default: 4)")
+    parser.add_argument("--delay",    type=float, default=2.0, help="Segundos entre requests por worker (default: 2.0)")
+    parser.add_argument("--limit",    type=int,   default=None, help="Máx propiedades a procesar")
     args = parser.parse_args()
-
-    main(limit=args.limit, batch_size=args.batch_size, delay=args.delay)
+    main(limit=args.limit, workers=args.workers, delay=args.delay)

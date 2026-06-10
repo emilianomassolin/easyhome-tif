@@ -41,6 +41,8 @@ class Property(Base):
     fecha_analisis = Column(DateTime(timezone=True), nullable=True)
     manual_override = Column(JSONB, nullable=True)
     duplicate_of = Column(Integer, ForeignKey("properties.id", ondelete="SET NULL"), nullable=True, index=True)
+    superficie_m2 = Column(Float, nullable=True)
+    ambientes = Column(Integer, nullable=True)
 
 
 class ScraperLog(Base):

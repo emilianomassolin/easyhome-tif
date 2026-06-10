@@ -10,6 +10,7 @@ from bs4 import BeautifulSoup
 from backend.database.connection import SessionLocal
 from backend.database.models import Property
 from backend.scrapers.dedup_utils import find_canonical
+from backend.scrapers.extract_utils import extraer_superficie, extraer_ambientes
 
 logger = logging.getLogger(__name__)
 
@@ -206,19 +207,23 @@ def _save_cards(db, cards: list[dict], fetch_detail: bool = True) -> int:
             if "mendoza" not in ubicacion.lower():
                 ubicacion = f"{ubicacion}, Mendoza"
 
+            sup = extraer_superficie(detail["descripcion"] or "")
+            amb = extraer_ambientes(detail["descripcion"] or "")
             new_prop = Property(
-                ml_id        = card["ml_id"],
-                titulo       = card["titulo"],
-                precio       = card["precio"],
-                descripcion  = detail["descripcion"],
-                ubicacion    = ubicacion,
-                permalink_ml = f"{BASE_URL}{card['link']}",
-                fotos_urls   = detail["fotos"] or None,
-                fuente       = "argenprop",
+                ml_id          = card["ml_id"],
+                titulo         = card["titulo"],
+                precio         = card["precio"],
+                descripcion    = detail["descripcion"],
+                ubicacion      = ubicacion,
+                permalink_ml   = f"{BASE_URL}{card['link']}",
+                fotos_urls     = detail["fotos"] or None,
+                fuente         = "argenprop",
                 tipo_operacion = card["tipo_op"],
-                activa       = True,
+                activa         = True,
+                superficie_m2  = sup,
+                ambientes      = amb,
             )
-            canonical_id = find_canonical(db, ubicacion, card["precio"], card["tipo_op"], "argenprop")
+            canonical_id = find_canonical(db, ubicacion, card["precio"], card["tipo_op"], "argenprop", sup, amb)
             if canonical_id:
                 new_prop.duplicate_of = canonical_id
             db.add(new_prop)

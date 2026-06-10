@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 from backend.database.connection import SessionLocal
 from backend.database.models import Property
 from backend.scrapers.dedup_utils import find_canonical
+from backend.scrapers.extract_utils import extraer_superficie, extraer_ambientes
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +209,11 @@ def _scrape_operacion(operacion: str, max_paginas: int) -> tuple[int, set[str]]:
                                 if len(texto) > len(item.get("descripcion", "")):
                                     item["descripcion"] = texto[:2000]
                         time.sleep(1.5)
+                    desc = item.get("descripcion", "") or ""
+                    sup = extraer_superficie(desc)
+                    amb = extraer_ambientes(desc)
+                    if sup: item["superficie_m2"] = sup
+                    if amb: item["ambientes"] = amb
                     new_prop = Property(**item)
                     canonical_id = find_canonical(
                         db,
@@ -215,6 +221,8 @@ def _scrape_operacion(operacion: str, max_paginas: int) -> tuple[int, set[str]]:
                         precio=item.get("precio"),
                         tipo_operacion=operacion,
                         fuente="zonaprop",
+                        superficie_m2=sup,
+                        ambientes=amb,
                     )
                     if canonical_id:
                         new_prop.duplicate_of = canonical_id

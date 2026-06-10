@@ -6,6 +6,7 @@ import requests
 from backend.database.connection import SessionLocal
 from backend.database.models import Property
 from backend.scrapers.dedup_utils import find_canonical
+from backend.scrapers.extract_utils import extraer_superficie, extraer_ambientes
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,8 @@ def _scrape_op_type(op_type: int) -> tuple[int, set[str]]:
                     if fotos and existing.fotos_urls != fotos:
                         existing.fotos_urls = fotos
                 else:
+                    sup = extraer_superficie(descripcion)
+                    amb = extraer_ambientes(descripcion)
                     new_prop = Property(
                         ml_id=prop_id,
                         titulo=titulo,
@@ -127,8 +130,10 @@ def _scrape_op_type(op_type: int) -> tuple[int, set[str]]:
                         fuente="mendozaprop",
                         tipo_operacion=tipo_op,
                         activa=True,
+                        superficie_m2=sup,
+                        ambientes=amb,
                     )
-                    canonical_id = find_canonical(db, ubicacion, precio, tipo_op, "mendozaprop")
+                    canonical_id = find_canonical(db, ubicacion, precio, tipo_op, "mendozaprop", sup, amb)
                     if canonical_id:
                         new_prop.duplicate_of = canonical_id
                     db.add(new_prop)

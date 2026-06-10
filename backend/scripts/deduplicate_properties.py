@@ -23,14 +23,15 @@ from sqlalchemy import create_engine, text
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
-SIMILARITY_THRESHOLD = 0.80
-PRICE_TOLERANCE = 0.10  # ±10%
+BASE_SIM_THRESHOLD  = 0.80   # solo dirección+precio
+BONUS_SIM_THRESHOLD = 0.65   # cuando m² o ambientes también coinciden
+PRICE_TOLERANCE     = 0.10   # ±10%
+SUP_TOLERANCE       = 0.15   # ±15% superficie
 
 FIND_PAIRS_SQL = text("""
     SELECT
         a.id  AS id_a,
         b.id  AS id_b,
-        -- Canónica = más fotos, si empate la más antigua (menor id)
         CASE
             WHEN COALESCE(jsonb_array_length(a.fotos_urls), 0) >=
                  COALESCE(jsonb_array_length(b.fotos_urls), 0)
@@ -42,16 +43,20 @@ FIND_PAIRS_SQL = text("""
             THEN b.id ELSE a.id
         END AS duplicate_id,
         round(similarity(a.ubicacion, b.ubicacion)::numeric, 3) AS sim,
-        a.ubicacion AS ubic_a,
-        b.ubicacion AS ubic_b,
-        a.precio AS precio_a,
-        b.precio  AS precio_b,
-        a.fuente  AS fuente_a,
-        b.fuente  AS fuente_b,
+        a.ubicacion    AS ubic_a,
+        b.ubicacion    AS ubic_b,
+        a.precio       AS precio_a,
+        b.precio       AS precio_b,
+        a.superficie_m2 AS sup_a,
+        b.superficie_m2 AS sup_b,
+        a.ambientes    AS amb_a,
+        b.ambientes    AS amb_b,
+        a.fuente       AS fuente_a,
+        b.fuente       AS fuente_b,
         a.tipo_operacion
     FROM properties a
     JOIN properties b ON a.id < b.id
-    WHERE a.fuente          != b.fuente
+    WHERE a.fuente         != b.fuente
       AND a.activa          = true
       AND b.activa          = true
       AND a.duplicate_of    IS NULL
@@ -64,9 +69,23 @@ FIND_PAIRS_SQL = text("""
       AND b.precio          IS NOT NULL
       AND a.tipo_operacion  IS NOT NULL
       AND a.tipo_operacion  = b.tipo_operacion
-      AND similarity(a.ubicacion, b.ubicacion) >= :sim_threshold
       AND abs(a.precio - b.precio)
           / NULLIF(greatest(a.precio, b.precio), 0) < :price_tol
+      AND (
+        -- Dirección muy similar → basta sola
+        similarity(a.ubicacion, b.ubicacion) >= :base_sim
+        OR
+        -- Dirección moderada + superficie coincide
+        (similarity(a.ubicacion, b.ubicacion) >= :bonus_sim
+         AND a.superficie_m2 IS NOT NULL AND b.superficie_m2 IS NOT NULL
+         AND abs(a.superficie_m2 - b.superficie_m2)
+             / NULLIF(greatest(a.superficie_m2, b.superficie_m2), 0) < :sup_tol)
+        OR
+        -- Dirección moderada + ambientes coincide
+        (similarity(a.ubicacion, b.ubicacion) >= :bonus_sim
+         AND a.ambientes IS NOT NULL AND b.ambientes IS NOT NULL
+         AND a.ambientes = b.ambientes)
+      )
     ORDER BY sim DESC, canonical_id
 """)
 
@@ -85,7 +104,12 @@ def run(db_url: str, dry_run: bool):
         log.info("Buscando pares duplicados...")
         rows = conn.execute(
             FIND_PAIRS_SQL,
-            {"sim_threshold": SIMILARITY_THRESHOLD, "price_tol": PRICE_TOLERANCE},
+            {
+                "base_sim":  BASE_SIM_THRESHOLD,
+                "bonus_sim": BONUS_SIM_THRESHOLD,
+                "price_tol": PRICE_TOLERANCE,
+                "sup_tol":   SUP_TOLERANCE,
+            },
         ).fetchall()
         log.info(f"Pares encontrados: {len(rows)}")
 
@@ -100,12 +124,18 @@ def run(db_url: str, dry_run: bool):
                 continue
             already_marked.add(dup_id)
             to_mark.append((can_id, dup_id))
+            extras = []
+            if r.sup_a and r.sup_b:
+                extras.append(f"{r.sup_a:.0f}≈{r.sup_b:.0f}m²")
+            if r.amb_a and r.amb_b:
+                extras.append(f"{r.amb_a}≈{r.amb_b}amb")
             log.info(
                 f"  DUP {dup_id} → CANON {can_id} "
                 f"[{r.fuente_a}↔{r.fuente_b}] "
                 f"sim={r.sim} "
-                f"'{r.ubic_a[:40]}' ≈ '{r.ubic_b[:40]}' "
+                f"'{r.ubic_a[:35]}' ≈ '{r.ubic_b[:35]}' "
                 f"${r.precio_a:.0f}≈${r.precio_b:.0f}"
+                + (f" | {' '.join(extras)}" if extras else "")
             )
 
         if dry_run:

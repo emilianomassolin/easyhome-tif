@@ -1,0 +1,14 @@
+[Unit]
+Description=Update vercel.json with current cloudflared tunnel URL
+After=cloudflared.service network-online.target
+Requires=cloudflared.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/easyhome/scripts/update_tunnel_url.sh
+StandardOutput=journal
+StandardError=journal
+User=ubuntu
+
+[Install]
+WantedBy=multi-user.target

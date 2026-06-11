@@ -3,7 +3,6 @@ import { authApi } from '../authApi'
 import { useAuth } from '../context/AuthContext'
 import PropertyCard from '../components/PropertyCard'
 import PropertyModal from '../components/PropertyModal'
-import { SCORE_COLOR } from '../components/ScoreBar'
 
 export default function FavoritesPage({ onClose }) {
   const { token, favoriteIds, toggleFavorite } = useAuth()

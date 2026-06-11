@@ -1,9 +1,12 @@
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from backend.database.connection import init_db
 from backend.scheduler.jobs import start_scheduler, stop_scheduler
@@ -47,3 +50,15 @@ app.include_router(router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(user_router, prefix="/api")
+
+# Servir frontend estático si existe el build
+_DIST = Path(__file__).parent.parent / "frontend" / "dist"
+if _DIST.exists():
+    app.mount("/assets", StaticFiles(directory=_DIST / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str):
+        file = _DIST / full_path
+        if file.is_file():
+            return FileResponse(file)
+        return FileResponse(_DIST / "index.html")

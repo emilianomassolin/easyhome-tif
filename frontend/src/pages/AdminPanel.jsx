@@ -69,65 +69,6 @@ function Btn({ children, onClick, variant = 'primary', disabled, small }) {
   )
 }
 
-// ── Login ────────────────────────────────────────────────────────────────────
-
-function AdminLogin({ onLogin }) {
-  const [token, setToken] = useState('')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
-
-  async function handleLogin(e) {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
-    try {
-      await adminApi.getDashboard(token)
-      localStorage.setItem('eh-admin-token', token)
-      onLogin(token)
-    } catch (err) {
-      setError('Token inválido. Verificá el valor de ADMIN_TOKEN en tu .env')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div className="min-h-screen flex items-center justify-center theme-bg">
-      <div className="w-full max-w-sm">
-        <Card>
-          <div className="text-center mb-6">
-            <div className="w-12 h-12 mx-auto mb-3 flex items-center justify-center rounded-2xl"
-              style={{ background: 'linear-gradient(145deg, #1C1C1E, #3A3A3C)' }}>
-              <span className="text-2xl">⚙️</span>
-            </div>
-            <h2 className="text-xl font-bold" style={{ color: 'var(--c-text)' }}>Panel Admin</h2>
-            <p className="text-sm mt-1" style={{ color: 'var(--c-text2)' }}>EasyHome · Área restringida</p>
-          </div>
-          <form onSubmit={handleLogin} className="space-y-3">
-            <input
-              type="password"
-              value={token}
-              onChange={e => setToken(e.target.value)}
-              placeholder="Token de administrador"
-              className="w-full px-3 py-2.5 rounded-xl text-sm outline-none"
-              style={{
-                backgroundColor: 'var(--c-input-bg)',
-                border: '1px solid var(--c-input-border)',
-                color: 'var(--c-text)',
-              }}
-              autoFocus
-            />
-            {error && <p className="text-xs" style={{ color: '#FF3B30' }}>{error}</p>}
-            <Btn disabled={!token || loading}>
-              {loading ? 'Verificando…' : 'Ingresar'}
-            </Btn>
-          </form>
-        </Card>
-      </div>
-    </div>
-  )
-}
-
 // ── Dashboard Tab ─────────────────────────────────────────────────────────────
 
 function DashboardTab({ token }) {

@@ -1,11 +1,11 @@
-import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
+from backend.api.auth_routes import get_current_user
 from backend.database.connection import get_db
 from backend.database.models import Property, Comentario, User, VotoCriterio
 from backend.nlp.analyzer import analizar_texto
@@ -256,19 +256,8 @@ def add_comment(
     property_id: int,
     body: ComentarioIn,
     db: Session = Depends(get_db),
-    request: Request = None,
+    user: User = Depends(get_current_user),
 ):
-    from backend.core.security import decode_token
-    auth = request.headers.get("Authorization", "") if request else ""
-    if not auth.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Se requiere iniciar sesión para comentar")
-    payload = decode_token(auth[7:])
-    if not payload:
-        raise HTTPException(status_code=401, detail="Token inválido o expirado")
-    user = db.query(User).filter(User.id == int(payload["sub"]), User.activo == True).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Usuario no encontrado")
-
     prop = db.query(Property).filter(Property.id == property_id, Property.activa == True).first()
     if not prop:
         raise HTTPException(status_code=404, detail="Propiedad no encontrada")
@@ -293,20 +282,15 @@ def add_comment(
 
 
 @router.delete("/comments/{comment_id}")
-def delete_comment(comment_id: int, db: Session = Depends(get_db), request: Request = None):
-    from backend.core.security import decode_token
-    auth = request.headers.get("Authorization", "") if request else ""
-    if not auth.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="No autenticado")
-    payload = decode_token(auth[7:])
-    if not payload:
-        raise HTTPException(status_code=401, detail="Token inválido")
-    user_id = int(payload["sub"])
-
+def delete_comment(
+    comment_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     comment = db.query(Comentario).filter(Comentario.id == comment_id, Comentario.activo == True).first()
     if not comment:
         raise HTTPException(status_code=404, detail="Comentario no encontrado")
-    if comment.user_id != user_id:
+    if comment.user_id != user.id:
         raise HTTPException(status_code=403, detail="No podés eliminar comentarios de otros usuarios")
     comment.activo = False
     db.commit()
@@ -348,21 +332,10 @@ def votar_criterio(
     property_id: int,
     body: VotoCriterioIn,
     db: Session = Depends(get_db),
-    request: Request = None,
+    user: User = Depends(get_current_user),
 ):
-    from backend.core.security import decode_token
     from sqlalchemy import func
     from sqlalchemy.dialects.postgresql import insert as pg_insert
-
-    auth = request.headers.get("Authorization", "") if request else ""
-    if not auth.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Se requiere iniciar sesión para votar")
-    payload = decode_token(auth[7:])
-    if not payload:
-        raise HTTPException(status_code=401, detail="Token inválido o expirado")
-    user = db.query(User).filter(User.id == int(payload["sub"]), User.activo == True).first()
-    if not user:
-        raise HTTPException(status_code=401, detail="Usuario no encontrado")
 
     if body.criterio not in CRITERIOS_VALIDOS:
         raise HTTPException(status_code=400, detail="Criterio no válido")
@@ -420,21 +393,11 @@ def eliminar_voto_criterio(
     property_id: int,
     criterio: str,
     db: Session = Depends(get_db),
-    request: Request = None,
+    user: User = Depends(get_current_user),
 ):
-    from backend.core.security import decode_token
-
-    auth = request.headers.get("Authorization", "") if request else ""
-    if not auth.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Se requiere iniciar sesión")
-    payload = decode_token(auth[7:])
-    if not payload:
-        raise HTTPException(status_code=401, detail="Token inválido o expirado")
-    user_id = int(payload["sub"])
-
     voto = db.query(VotoCriterio).filter(
         VotoCriterio.property_id == property_id,
-        VotoCriterio.user_id == user_id,
+        VotoCriterio.user_id == user.id,
         VotoCriterio.criterio == criterio,
     ).first()
     if not voto:
@@ -445,62 +408,3 @@ def eliminar_voto_criterio(
     return {"ok": True}
 
 
-@router.post("/scrape/argenprop")
-def scrape_argenprop_endpoint(db: Session = Depends(get_db)):
-    from backend.scrapers.argenprop_scraper import scrape_argenprop
-    saved = scrape_argenprop()
-    return {"mensaje": f"Argenprop: {saved} propiedades nuevas/actualizadas.", "guardadas": saved}
-
-
-@router.post("/analyze-all")
-def analyze_all(fuente: Optional[str] = None, db: Session = Depends(get_db)):
-    query = db.query(Property).filter(Property.activa == True, Property.analizado == False)
-    if fuente:
-        query = query.filter(Property.fuente == fuente)
-    pendientes = query.all()
-
-    if not pendientes:
-        return {"mensaje": "No hay propiedades pendientes de análisis.", "analizadas": 0}
-
-    analizadas = 0
-    filtradas = 0
-    enviadas_vision = 0
-    for i, prop in enumerate(pendientes):
-        try:
-            if tiene_keywords_accesibilidad(prop.titulo, prop.descripcion):
-                nlp = analizar_texto(prop.descripcion)
-                nlp_positivo = any(v for k, v in nlp.items() if k != "confianza" and v is True)
-                if nlp_positivo:
-                    vision = analizar_imagenes(prop.fotos_urls)
-                    enviadas_vision += 1
-                else:
-                    vision = VISION_VACIA
-            else:
-                nlp = RESULTADO_VACIO
-                vision = VISION_VACIA
-                filtradas += 1
-
-            resultado = calcular_score(nlp, vision, prop.titulo)
-            prop.nlp_resultado = nlp
-            prop.vision_resultado = vision
-            prop.score_accesibilidad = resultado["score_accesibilidad"]
-            prop.justificacion_score = resultado["justificacion"]
-            prop.confianza_general = resultado["confianza"]
-            prop.analizado = True
-            prop.fecha_analisis = datetime.now(timezone.utc)
-            analizadas += 1
-        except Exception:
-            continue
-
-        if (i + 1) % 100 == 0:
-            db.commit()
-
-    db.commit()
-    enviadas_nlp = analizadas - filtradas
-    return {
-        "mensaje": f"{analizadas} propiedades procesadas: {filtradas} descartadas por keywords, {enviadas_nlp} enviadas a NLP, {enviadas_vision} enviadas a visión.",
-        "analizadas": analizadas,
-        "filtradas_sin_keywords": filtradas,
-        "enviadas_nlp": enviadas_nlp,
-        "enviadas_vision": enviadas_vision,
-    }

@@ -6,26 +6,24 @@ const AuthContext = createContext(null)
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [token, setToken] = useState(() => localStorage.getItem('eh-auth-token'))
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => !!localStorage.getItem('eh-auth-token'))
   const [favoriteIds, setFavoriteIds] = useState(new Set())
 
   useEffect(() => {
-    if (token) {
-      authApi.me(token)
-        .then(u => {
-          setUser(u)
-          return authApi.getFavoriteIds(token)
-        })
-        .then(ids => setFavoriteIds(new Set(ids)))
-        .catch(() => {
-          localStorage.removeItem('eh-auth-token')
-          setToken(null)
-          setUser(null)
-        })
-        .finally(() => setLoading(false))
-    } else {
-      setLoading(false)
-    }
+    const stored = localStorage.getItem('eh-auth-token')
+    if (!stored) return
+    authApi.me(stored)
+      .then(u => {
+        setUser(u)
+        return authApi.getFavoriteIds(stored)
+      })
+      .then(ids => setFavoriteIds(new Set(ids)))
+      .catch(() => {
+        localStorage.removeItem('eh-auth-token')
+        setToken(null)
+        setUser(null)
+      })
+      .finally(() => setLoading(false))
   }, [])
 
   function login(newToken, newUser) {
@@ -68,4 +66,5 @@ export function AuthProvider({ children }) {
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- contexto y hook van juntos
 export const useAuth = () => useContext(AuthContext)

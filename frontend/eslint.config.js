@@ -17,5 +17,10 @@ export default defineConfig([
       globals: globals.browser,
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
+    rules: {
+      // Regla orientada a React Compiler; marca el patrón estándar de
+      // fetch-en-effect que usa toda la app. No aplica a este proyecto.
+      'react-hooks/set-state-in-effect': 'off',
+    },
   },
 ])

@@ -861,13 +861,16 @@ function AnalisisTab({ token }) {
   const esRef = useRef(null)
   const logRef = useRef(null)
 
-  const loadStatus = () => adminApi.getAnalysisStatus(token).then(setStatus).catch(() => {})
+  const loadStatus = useCallback(
+    () => adminApi.getAnalysisStatus(token).then(setStatus).catch(() => {}),
+    [token],
+  )
 
   useEffect(() => {
     loadStatus()
     const iv = setInterval(loadStatus, 10000)
     return () => clearInterval(iv)
-  }, [token])
+  }, [loadStatus])
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight

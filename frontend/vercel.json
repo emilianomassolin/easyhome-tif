@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/(.*)", "destination": "https://satin-facilities-buy-find.trycloudflare.com/$1" }
   ]
 }

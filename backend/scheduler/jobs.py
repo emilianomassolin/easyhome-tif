@@ -24,7 +24,23 @@ def _run_all_sources():
         except Exception as e:
             logger.error(f"{nombre} falló: {e}")
 
+    _record_snapshots()
     logger.info("=== Actualización completada ===")
+
+
+def _record_snapshots():
+    """Graba un snapshot diario de todas las fuentes para el timeline."""
+    from backend.api.admin_routes import _record_snapshot
+    from backend.database.connection import SessionLocal
+    db = SessionLocal()
+    try:
+        for fuente in ["mendozaprop", "zonaprop", "argenprop"]:
+            _record_snapshot(db, fuente)
+        logger.info("Snapshots de timeline grabados.")
+    except Exception as e:
+        logger.error(f"Error grabando snapshots: {e}")
+    finally:
+        db.close()
 
 
 def start_scheduler():

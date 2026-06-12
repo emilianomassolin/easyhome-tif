@@ -435,7 +435,11 @@ def _record_snapshot(db, fuente: str):
     from sqlalchemy import func as _func
     rows = (
         db.query(Property.tipo_operacion, _func.count(Property.id))
-        .filter(Property.activa == True, Property.fuente == fuente)
+        .filter(
+            Property.activa == True,
+            Property.duplicate_of == None,
+            Property.fuente == fuente,
+        )
         .group_by(Property.tipo_operacion)
         .all()
     )
@@ -726,27 +730,43 @@ def get_timeline(
         filters += " AND fuente = :fuente"
         params["fuente"] = fuente
 
+    # Último snapshot de cada (fuente, tipo) dentro del período. Promediar
+    # distorsiona: un snapshot tomado a mitad de un scrape (p. ej. 259 props)
+    # arrastraría el promedio del día para abajo.
     sql = _text(f"""
-        SELECT DATE_TRUNC('{trunc}', fecha) AS periodo,
+        SELECT DISTINCT ON (DATE_TRUNC('{trunc}', fecha), fuente, tipo_operacion)
+               DATE_TRUNC('{trunc}', fecha) AS periodo,
                fuente,
                tipo_operacion,
-               ROUND(AVG(cantidad)) AS cantidad
+               cantidad
         FROM snapshots_propiedades
         {filters}
-        GROUP BY periodo, fuente, tipo_operacion
-        ORDER BY periodo ASC
+        ORDER BY DATE_TRUNC('{trunc}', fecha), fuente, tipo_operacion, fecha DESC
     """)
-
     rows = db.execute(sql, params).fetchall()
-    return [
-        {
-            "fecha": r.periodo.isoformat(),
-            "fuente": r.fuente,
-            "tipo_operacion": r.tipo_operacion,
-            "cantidad": int(r.cantidad),
-        }
-        for r in rows
-    ]
+
+    # Forward-fill: no todas las fuentes tienen snapshot en todos los períodos
+    # (solo se graban cuando corre un scraper). Sin esto, al sumar "todas las
+    # fuentes" los períodos incompletos muestran caídas falsas.
+    periodos = sorted({r.periodo for r in rows})
+    series: dict = {}
+    for r in rows:
+        series.setdefault((r.fuente, r.tipo_operacion), {})[r.periodo] = int(r.cantidad)
+
+    result = []
+    ultimos = {clave: None for clave in series}
+    for periodo in periodos:
+        for clave, valores in series.items():
+            if periodo in valores:
+                ultimos[clave] = valores[periodo]
+            if ultimos[clave] is not None:
+                result.append({
+                    "fecha": periodo.isoformat(),
+                    "fuente": clave[0],
+                    "tipo_operacion": clave[1],
+                    "cantidad": ultimos[clave],
+                })
+    return result
 
 
 # ── Comentarios (moderación) ──────────────────────────────────────────────────

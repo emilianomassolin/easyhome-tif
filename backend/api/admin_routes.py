@@ -456,7 +456,10 @@ def _record_snapshot(db, fuente: str):
     for solo_acc in (False, True):
         q = base
         if solo_acc:
-            q = q.filter(Property.score_accesibilidad > SCORE_ACCESIBLE_MIN)
+            q = q.filter(
+                Property.analizado == True,
+                Property.score_accesibilidad > SCORE_ACCESIBLE_MIN,
+            )
         for tipo_operacion, cantidad in q.group_by(Property.tipo_operacion).all():
             db.add(SnapshotPropiedades(
                 fecha=now,

@@ -1120,15 +1120,17 @@ const LINE_COLORS = {
 }
 
 const GRANULARIDADES = [
-  { key: 'dia',  label: 'Día' },
-  { key: 'mes',  label: 'Mes' },
-  { key: 'anio', label: 'Año' },
+  { key: 'dia',    label: 'Día' },
+  { key: 'semana', label: 'Semana' },
+  { key: 'mes',    label: 'Mes' },
+  { key: 'anio',   label: 'Año' },
 ]
 
 function formatFecha(fecha, granularidad) {
   const d = new Date(fecha)
   if (granularidad === 'anio') return d.getUTCFullYear().toString()
   if (granularidad === 'mes') return d.toLocaleDateString('es-AR', { month: 'short', year: 'numeric', timeZone: 'UTC' })
+  if (granularidad === 'semana') return 'Sem. ' + d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })
   return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', timeZone: 'UTC' })
 }
 
@@ -1137,12 +1139,13 @@ function TimelineTab({ token }) {
   const [loading, setLoading]         = useState(true)
   const [fuente, setFuente]           = useState('')
   const [granularidad, setGranularidad] = useState('dia')
+  const [soloAccesibles, setSoloAccesibles] = useState(false)
   const [error, setError]             = useState('')
 
   useEffect(() => {
     setLoading(true)
     setError('')
-    adminApi.getTimeline(token, fuente || undefined, granularidad)
+    adminApi.getTimeline(token, fuente || undefined, granularidad, soloAccesibles)
       .then(rows => {
         const map = {}
         rows.forEach(r => {
@@ -1155,7 +1158,7 @@ function TimelineTab({ token }) {
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
-  }, [token, fuente, granularidad])
+  }, [token, fuente, granularidad, soloAccesibles])
 
   const tipos = [...new Set(data.flatMap(d => Object.keys(d).filter(k => k !== 'fecha' && k !== 'fechaLabel')))]
 
@@ -1164,9 +1167,26 @@ function TimelineTab({ token }) {
       <Card>
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <h2 className="text-sm font-semibold" style={{ color: 'var(--c-text)' }}>
-            Evolución de propiedades en el tiempo
+            {soloAccesibles ? 'Evolución de propiedades accesibles' : 'Evolución de propiedades en el tiempo'}
           </h2>
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Todas vs Solo accesibles */}
+            <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: 'var(--c-border)' }}>
+              {[['Todas', false], ['Solo accesibles', true]].map(([label, val]) => (
+                <button
+                  key={label}
+                  onClick={() => setSoloAccesibles(val)}
+                  className="px-3 py-1 text-xs font-medium transition-colors"
+                  style={{
+                    background: soloAccesibles === val ? 'var(--c-green)' : 'var(--c-surface2)',
+                    color: soloAccesibles === val ? '#fff' : 'var(--c-text2)',
+                    borderRight: '1px solid var(--c-border)',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             {/* Granularity toggle */}
             <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: 'var(--c-border)' }}>
               {GRANULARIDADES.map(g => (

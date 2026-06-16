@@ -75,10 +75,11 @@ export const adminApi = {
     req(token, `/users/${id}/status?activo=${activo}`, { method: 'PATCH' }),
 
   // Timeline
-  getTimeline: (token, fuente, granularidad = 'dia') => {
+  getTimeline: (token, fuente, granularidad = 'dia', soloAccesibles = false) => {
     const q = new URLSearchParams()
     if (fuente) q.append('fuente', fuente)
     if (granularidad) q.append('granularidad', granularidad)
+    if (soloAccesibles) q.append('solo_accesibles', 'true')
     return req(token, `/timeline?${q}`)
   },
 

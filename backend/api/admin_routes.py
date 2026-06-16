@@ -435,28 +435,36 @@ def _get_scraper_func(fuente: str):
     raise HTTPException(status_code=400, detail=f"Fuente desconocida: {fuente}")
 
 
+# Umbral de score a partir del cual consideramos una propiedad "accesible"
+# (>= "Parcialmente accesible" en la escala de NIVELES). Cambiar acá ajusta
+# tanto los snapshots como el modo "Solo accesibles" del timeline.
+SCORE_ACCESIBLE_MIN = 3.5
+
+
 def _record_snapshot(db, fuente: str):
-    """Guarda un snapshot de cuántas propiedades activas hay por fuente y tipo_operacion."""
+    """Guarda snapshots de cuántas propiedades activas hay por fuente y
+    tipo_operacion: una serie con el total y otra solo con las accesibles."""
     from sqlalchemy import func as _func
-    rows = (
-        db.query(Property.tipo_operacion, _func.count(Property.id))
-        .filter(
-            Property.activa == True,
-            Property.duplicate_of == None,
-            Property.fuente == fuente,
-        )
-        .group_by(Property.tipo_operacion)
-        .all()
-    )
     now = datetime.now(timezone.utc)
-    for tipo_operacion, cantidad in rows:
-        snap = SnapshotPropiedades(
-            fecha=now,
-            fuente=fuente,
-            tipo_operacion=tipo_operacion,
-            cantidad=cantidad,
-        )
-        db.add(snap)
+
+    base = db.query(Property.tipo_operacion, _func.count(Property.id)).filter(
+        Property.activa == True,
+        Property.duplicate_of == None,
+        Property.fuente == fuente,
+    )
+
+    for solo_acc in (False, True):
+        q = base
+        if solo_acc:
+            q = q.filter(Property.score_accesibilidad >= SCORE_ACCESIBLE_MIN)
+        for tipo_operacion, cantidad in q.group_by(Property.tipo_operacion).all():
+            db.add(SnapshotPropiedades(
+                fecha=now,
+                fuente=fuente,
+                tipo_operacion=tipo_operacion,
+                cantidad=cantidad,
+                solo_accesibles=solo_acc,
+            ))
     db.commit()
 
 
@@ -740,15 +748,16 @@ def update_user_status(user_id: int, activo: bool, db: Session = Depends(get_db)
 def get_timeline(
     fuente: Optional[str] = None,
     granularidad: str = "dia",
+    solo_accesibles: bool = False,
     db: Session = Depends(get_db),
 ):
     from sqlalchemy import text as _text, func as _func
 
-    trunc_map = {"dia": "day", "mes": "month", "anio": "year"}
+    trunc_map = {"dia": "day", "semana": "week", "mes": "month", "anio": "year"}
     trunc = trunc_map.get(granularidad, "day")
 
-    filters = "WHERE 1=1"
-    params: dict = {}
+    filters = "WHERE solo_accesibles = :solo_acc"
+    params: dict = {"solo_acc": solo_accesibles}
     if fuente:
         filters += " AND fuente = :fuente"
         params["fuente"] = fuente

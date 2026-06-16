@@ -154,3 +154,6 @@ class SnapshotPropiedades(Base):
     fuente = Column(String(50), nullable=False)
     tipo_operacion = Column(String(20), nullable=True)
     cantidad = Column(Integer, default=0, nullable=False)
+    # False = snapshot del total de propiedades; True = solo las accesibles
+    # (score >= umbral). Permite graficar ambas series en el timeline.
+    solo_accesibles = Column(Boolean, default=False, nullable=False)

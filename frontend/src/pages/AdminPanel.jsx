@@ -876,48 +876,66 @@ function AnalisisTab({ token }) {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
   }, [logLines])
 
-  async function handleStart() {
+  const connectStream = useCallback((runId) => {
+    if (esRef.current) return
     setRunning(true)
+    const url = adminApi.getAnalysisStreamUrl(token, runId)
+    const es = new EventSource(url)
+    esRef.current = es
+
+    es.onmessage = (e) => {
+      const msg = e.data
+      if (msg === '__END__') {
+        es.close()
+        esRef.current = null
+        setRunning(false)
+        loadStatus()
+      } else if (msg.startsWith('PROGRESS:')) {
+        const parts = msg.split(' ')[0].replace('PROGRESS:', '').split(':')
+        const [analizadas, total, nlp, vision, errores] = parts.map(Number)
+        setProgress({ analizadas, total, nlp, vision, errores })
+        setLogLines(l => [...l.slice(-200), msg.split('| ').slice(1).join('| ')])
+      } else {
+        setLogLines(l => [...l.slice(-200), msg])
+      }
+    }
+    es.onerror = () => {
+      es.close()
+      esRef.current = null
+      setRunning(false)
+      setLogLines(l => [...l, '⚠️ Conexión interrumpida — el análisis sigue en el servidor. Recargá para ver progreso.'])
+    }
+  }, [token, loadStatus])
+
+  async function handleStart() {
     setLogLines(['Iniciando análisis...'])
     setProgress(null)
     try {
       const { run_id } = await adminApi.startAnalysis(token, workers)
-      const url = adminApi.getAnalysisStreamUrl(token, run_id)
-      const es = new EventSource(url)
-      esRef.current = es
-
-      es.onmessage = (e) => {
-        const msg = e.data
-        if (msg === '__END__') {
-          es.close()
-          setRunning(false)
-          loadStatus()
-        } else if (msg.startsWith('PROGRESS:')) {
-          const parts = msg.split(' ')[0].replace('PROGRESS:', '').split(':')
-          const [analizadas, total, nlp, vision, errores] = parts.map(Number)
-          setProgress({ analizadas, total, nlp, vision, errores })
-          setLogLines(l => [...l.slice(-200), msg.split('| ').slice(1).join('| ')])
-        } else {
-          setLogLines(l => [...l.slice(-200), msg])
-        }
-      }
-      es.onerror = () => {
-        es.close()
-        setRunning(false)
-        setLogLines(l => [...l, '⚠️ Conexión interrumpida — el análisis sigue en el servidor. Recargá para ver progreso.'])
-      }
+      connectStream(run_id)
     } catch (err) {
-      setRunning(false)
+      // 409 = ya hay un análisis en curso
       setLogLines(l => [...l, `❌ ${err.message}`])
+      loadStatus()
     }
   }
 
   function handleStop() {
     esRef.current?.close()
+    esRef.current = null
     setRunning(false)
     setLogLines(l => [...l, '⚠️ Desconectado del stream. El análisis continúa en el servidor.'])
   }
 
+  // Si el servidor reporta un análisis en curso y no estamos conectados (otra
+  // sesión lo lanzó, o recargamos la página), nos enganchamos al stream solo.
+  useEffect(() => {
+    if (status?.en_curso && status.run_id && !esRef.current) {
+      connectStream(status.run_id)
+    }
+  }, [status?.en_curso, status?.run_id, connectStream])
+
+  const isRunning = running || !!status?.en_curso
   const pct = progress ? Math.round((progress.analizadas / progress.total) * 100) :
               status ? Math.round((status.analizadas / (status.total || 1)) * 100) : 0
   const displayStatus = progress || status
@@ -928,15 +946,23 @@ function AnalisisTab({ token }) {
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-semibold" style={{ color: 'var(--c-text)' }}>Re-análisis de propiedades</h3>
           <div className="flex items-center gap-2">
+            {isRunning && (
+              <span className="text-xs flex items-center gap-1.5" style={{ color: 'var(--c-green)' }}>
+                <span className="inline-block w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--c-green)' }} />
+                Análisis en curso{status?.workers ? ` · ${status.workers} workers` : ''}
+              </span>
+            )}
             <span className="text-xs" style={{ color: 'var(--c-text3)' }}>Workers:</span>
-            <select value={workers} onChange={e => setWorkers(Number(e.target.value))} disabled={running}
+            <select value={workers} onChange={e => setWorkers(Number(e.target.value))} disabled={isRunning}
               className="text-xs rounded-lg px-2 py-1"
               style={{ background: 'var(--c-surface)', border: '1px solid var(--c-border)', color: 'var(--c-text)' }}>
               {[5, 10, 15, 20].map(n => <option key={n} value={n}>{n}</option>)}
             </select>
             {running
               ? <Btn small variant="ghost" onClick={handleStop}>Desconectar</Btn>
-              : <Btn small variant="primary" onClick={handleStart}>▶ Iniciar análisis</Btn>
+              : isRunning
+                ? <Btn small variant="ghost" onClick={() => status?.run_id && connectStream(status.run_id)}>🔄 Reconectar</Btn>
+                : <Btn small variant="primary" onClick={handleStart}>▶ Iniciar análisis</Btn>
             }
           </div>
         </div>

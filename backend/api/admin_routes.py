@@ -403,6 +403,11 @@ def resolve_report(
 
 _run_queues: dict[str, queue.Queue] = {}
 
+# Estado del análisis en curso (uno solo a la vez). Es fuente de verdad para
+# el guard de concurrencia y para que el frontend sepa si hay algo corriendo,
+# independiente de si alguien está consumiendo el stream.
+_analysis_state: dict = {"running": False, "run_id": None, "workers": None, "started_at": None}
+
 
 class _QueueHandler(logging.Handler):
     def __init__(self, q: queue.Queue):
@@ -593,9 +598,22 @@ def get_scraper_logs(
 
 @router.post("/analysis/start", dependencies=[Depends(require_admin)])
 def start_analysis(workers: int = 10):
+    # Guard de concurrencia: si ya hay un análisis corriendo, no lanzamos otro.
+    # Sin esto, dos clicks lanzaban dos corridas en paralelo (p. ej. 40 workers)
+    # que saturaban la API de NLP y generaban miles de timeouts.
+    if _analysis_state["running"]:
+        raise HTTPException(
+            status_code=409,
+            detail="Ya hay un análisis en curso. Esperá a que termine antes de lanzar otro.",
+        )
+
     run_id = uuid.uuid4().hex[:8]
     q: queue.Queue = queue.Queue(maxsize=5000)
     _run_queues[run_id] = q
+    _analysis_state.update(
+        running=True, run_id=run_id, workers=workers,
+        started_at=datetime.now(timezone.utc).isoformat(),
+    )
 
     def _run():
         from backend.scripts.analyze_all_fast import main
@@ -604,6 +622,8 @@ def start_analysis(workers: int = 10):
             q.put(f"__DONE__{count}")
         except Exception as e:
             q.put(f"__ERROR__{e}")
+        finally:
+            _analysis_state.update(running=False, run_id=None, workers=None, started_at=None)
 
     threading.Thread(target=_run, daemon=True).start()
     return {"run_id": run_id}
@@ -667,7 +687,10 @@ def analysis_status(db: Session = Depends(get_db)):
         "analizadas": int(r.analizadas or 0),
         "pendientes": int(r.total or 0) - int(r.analizadas or 0),
         "vision": int(vision),
-        "en_curso": bool(_run_queues),
+        "en_curso": _analysis_state["running"],
+        "run_id": _analysis_state["run_id"],
+        "workers": _analysis_state["workers"],
+        "started_at": _analysis_state["started_at"],
     }
 
 

@@ -277,7 +277,7 @@ function AppContent() {
             ))}
 
             <Segmented
-              options={[['desc', '↓ Score'], ['asc', '↑ Score']]}
+              options={[['desc', '↑ Score'], ['asc', '↓ Score']]}
               value={ordenScore} onChange={setOrdenScore}
             />
 

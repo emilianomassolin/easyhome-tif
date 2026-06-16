@@ -1,4 +1,6 @@
 import logging
+from datetime import datetime, timezone
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from backend.scrapers.mendozaprop_scraper import scrape_mendozaprop
@@ -13,19 +15,42 @@ scheduler = BackgroundScheduler()
 def _run_all_sources():
     logger.info("=== Iniciando actualización de todas las fuentes ===")
 
-    for nombre, funcion in [
-        ("MendozaProp",  scrape_mendozaprop),
-        ("ZonaProp",     scrape_zonaprop),
-        ("Argenprop",    scrape_argenprop),
+    for fuente, nombre, funcion in [
+        ("mendozaprop", "MendozaProp", scrape_mendozaprop),
+        ("zonaprop",    "ZonaProp",    scrape_zonaprop),
+        ("argenprop",   "Argenprop",   scrape_argenprop),
     ]:
-        try:
-            saved = funcion()
-            logger.info(f"{nombre}: {saved} propiedades nuevas.")
-        except Exception as e:
-            logger.error(f"{nombre} falló: {e}")
+        _run_scraper_logged(fuente, nombre, funcion)
 
     _record_snapshots()
     logger.info("=== Actualización completada ===")
+
+
+def _run_scraper_logged(fuente: str, nombre: str, funcion):
+    """Corre un scraper y registra un ScraperLog, igual que el endpoint manual,
+    para que las corridas automáticas también aparezcan en el dashboard."""
+    from backend.database.connection import SessionLocal
+    from backend.database.models import ScraperLog
+    db = SessionLocal()
+    log = ScraperLog(fuente=fuente, inicio=datetime.now(timezone.utc), estado="running", cantidad=0)
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    try:
+        saved = funcion()
+        log.fin = datetime.now(timezone.utc)
+        log.estado = "ok"
+        log.cantidad = saved or 0
+        db.commit()
+        logger.info(f"{nombre}: {saved} propiedades nuevas.")
+    except Exception as e:
+        log.fin = datetime.now(timezone.utc)
+        log.estado = "error"
+        log.mensaje_error = str(e)
+        db.commit()
+        logger.error(f"{nombre} falló: {e}")
+    finally:
+        db.close()
 
 
 def _record_snapshots():

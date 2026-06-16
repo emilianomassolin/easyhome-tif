@@ -435,10 +435,10 @@ def _get_scraper_func(fuente: str):
     raise HTTPException(status_code=400, detail=f"Fuente desconocida: {fuente}")
 
 
-# Umbral de score a partir del cual consideramos una propiedad "accesible"
-# (>= "Parcialmente accesible" en la escala de NIVELES). Cambiar acá ajusta
-# tanto los snapshots como el modo "Solo accesibles" del timeline.
-SCORE_ACCESIBLE_MIN = 3.5
+# Una propiedad cuenta como "accesible" si tiene algún rasgo de accesibilidad
+# detectado (score > 0), el mismo criterio que el contador "con accesibilidad"
+# del header. Cambiar acá ajusta los snapshots y el modo "Solo accesibles".
+SCORE_ACCESIBLE_MIN = 0.0
 
 
 def _record_snapshot(db, fuente: str):
@@ -456,7 +456,7 @@ def _record_snapshot(db, fuente: str):
     for solo_acc in (False, True):
         q = base
         if solo_acc:
-            q = q.filter(Property.score_accesibilidad >= SCORE_ACCESIBLE_MIN)
+            q = q.filter(Property.score_accesibilidad > SCORE_ACCESIBLE_MIN)
         for tipo_operacion, cantidad in q.group_by(Property.tipo_operacion).all():
             db.add(SnapshotPropiedades(
                 fecha=now,

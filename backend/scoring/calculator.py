@@ -32,9 +32,8 @@ CRITERIOS_EXCLUIDOS = {
     "galpon": {
         "ascensor", "bano_adaptado", "ducha_nivel_piso", "pasamanos",
     },
-    "local": {
-        "bano_adaptado", "ducha_nivel_piso",
-    },
+    # Los locales comerciales cuentan los 8 criterios (suelen requerir baño
+    # accesible al público por ley), así que no se excluye ninguno.
 }
 
 _TIPOS_KEYWORDS = {

@@ -144,7 +144,7 @@ def list_properties(
     orden: Optional[str] = 'desc',
     db: Session = Depends(get_db),
 ):
-    from sqlalchemy import nullslast, nullsfirst, desc, asc, or_
+    from sqlalchemy import nullslast, nullsfirst, desc, asc, or_, func
     query = db.query(Property).filter(
         Property.activa == True,
         Property.duplicate_of == None,
@@ -164,12 +164,14 @@ def list_properties(
     if criterios:
         lista = [c.strip() for c in criterios.split(",") if c.strip()]
         for criterio in lista:
-            query = query.filter(
-                or_(
-                    Property.nlp_resultado[criterio].as_boolean() == True,
-                    Property.vision_resultado[criterio].as_boolean() == True,
-                )
+            # Valor efectivo del criterio: si hay override manual (admin/comunidad)
+            # manda ese valor; si no, vale lo detectado por NLP o visión.
+            override = Property.manual_override[criterio].as_boolean()
+            detectado = or_(
+                func.coalesce(Property.nlp_resultado[criterio].as_boolean(), False),
+                func.coalesce(Property.vision_resultado[criterio].as_boolean(), False),
             )
+            query = query.filter(func.coalesce(override, detectado) == True)
     total = query.count()
     score_order = (
         nullsfirst(asc(Property.score_accesibilidad))

@@ -105,6 +105,9 @@ def _procesar(prop_id: int) -> None:
             return
 
         nlp = analizar_texto(prop.descripcion)
+        if nlp is None:
+            logger.warning(f"Prop {prop_id}: NLP no disponible, se omite (queda pendiente).")
+            return
         vision = _analizar_imagenes_sonnet(prop.fotos_urls)
         resultado = calcular_score(nlp, vision, prop.titulo)
 

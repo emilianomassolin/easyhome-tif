@@ -200,6 +200,8 @@ def analyze_property(property_id: int, db: Session = Depends(get_db)):
 
     if tiene_keywords_accesibilidad(prop.titulo, prop.descripcion):
         nlp = analizar_texto(prop.descripcion)
+        if nlp is None:
+            raise HTTPException(status_code=503, detail="El servicio de análisis de texto no está disponible. Intentá más tarde.")
         nlp_positivo = any(v for k, v in nlp.items() if k != "confianza" and v is True)
         vision = analizar_imagenes(prop.fotos_urls) if nlp_positivo else VISION_VACIA
     else:

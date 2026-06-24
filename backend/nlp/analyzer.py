@@ -29,7 +29,11 @@ Reglas: rampa=true si menciona rampa. ascensor=true si menciona ascensor/elevado
 JSON:"""
 
 
-def analizar_texto(descripcion: str | None) -> dict:
+def analizar_texto(descripcion: str | None) -> dict | None:
+    """Devuelve los criterios detectados en el texto, o None si la API de NLP
+    falló (timeout, error HTTP, respuesta inesperada). El caller debe tratar
+    None como 'no analizado' y reintentar luego, en vez de marcar la propiedad
+    como analizada sin accesibilidad (falso negativo)."""
     vacio = {c: False for c in CRITERIOS_NLP} | {"confianza": 0.0}
 
     if not descripcion or not descripcion.strip():
@@ -48,16 +52,32 @@ def analizar_texto(descripcion: str | None) -> dict:
             },
             timeout=20,
         )
-        texto = resp.json()["choices"][0]["message"]["content"].strip()
-        if texto.startswith("```"):
-            texto = texto.split("```")[1]
-            if texto.startswith("json"):
-                texto = texto[4:]
-        resultado = json.loads(texto.strip())
-        detectados = sum(1 for k, v in resultado.items() if k != "confianza" and v is True)
-        logger.info(f"NLP completado. Criterios detectados: {detectados}")
-        return resultado
-
     except Exception as e:
-        logger.error(f"Error en análisis NLP: {e}")
-        return vacio
+        logger.error(f"NLP: fallo de conexión con la API: {e}")
+        return None
+
+    if resp.status_code != 200:
+        logger.error(f"NLP: HTTP {resp.status_code} — {resp.text[:200]}")
+        return None
+
+    try:
+        texto = resp.json()["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        # La API respondió 200 pero sin el formato esperado (sin 'choices',
+        # cuerpo de error, etc.). Logueamos el cuerpo para diagnosticar.
+        logger.error(f"NLP: respuesta inesperada ({e}) — {resp.text[:200]}")
+        return None
+
+    if texto.startswith("```"):
+        texto = texto.split("```")[1]
+        if texto.startswith("json"):
+            texto = texto[4:]
+    try:
+        resultado = json.loads(texto.strip())
+    except Exception as e:
+        logger.error(f"NLP: JSON inválido del modelo ({e}) — {texto[:200]}")
+        return None
+
+    detectados = sum(1 for k, v in resultado.items() if k != "confianza" and v is True)
+    logger.info(f"NLP completado. Criterios detectados: {detectados}")
+    return resultado

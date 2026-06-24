@@ -72,6 +72,12 @@ def _procesar(prop_id: int) -> None:
             return
 
         nlp = analizar_texto(prop.descripcion)
+        if nlp is None:
+            # La API de NLP falló: dejamos la propiedad pendiente (no la
+            # marcamos analizada) para reintentarla en la próxima corrida.
+            with _lock:
+                _stats["errores"] += 1
+            return
         with _lock:
             _stats["nlp"] += 1
 

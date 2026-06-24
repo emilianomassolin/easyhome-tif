@@ -17,7 +17,7 @@ claude = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 FACU_API_BASE = os.getenv("FACU_API_BASE", "https://ai.cloud.um.edu.ar")
 FACU_API_KEY = os.getenv("FACU_API_KEY")
-FACU_MODEL = os.getenv("FACU_MODEL", "gemma4-e2b")
+FACU_MODEL = os.getenv("FACU_MODEL", "gemma4-26b")
 
 CRITERIOS_VISION = [
     "rampa", "ascensor", "bano_adaptado", "entrada_ancha",

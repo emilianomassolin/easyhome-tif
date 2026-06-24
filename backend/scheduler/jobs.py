@@ -20,35 +20,52 @@ def _run_all_sources():
         ("zonaprop",    "ZonaProp",    scrape_zonaprop),
         ("argenprop",   "Argenprop",   scrape_argenprop),
     ]:
-        _run_scraper_logged(fuente, nombre, funcion)
+        # Cada fuente aislada: un fallo no debe abortar las demás.
+        try:
+            _run_scraper_logged(fuente, nombre, funcion)
+        except Exception as e:
+            logger.error(f"{nombre}: error inesperado, se continúa con la siguiente fuente: {e}")
 
     _record_snapshots()
     logger.info("=== Actualización completada ===")
 
 
 def _run_scraper_logged(fuente: str, nombre: str, funcion):
-    """Corre un scraper y registra un ScraperLog, igual que el endpoint manual,
-    para que las corridas automáticas también aparezcan en el dashboard."""
+    """Corre un scraper y registra un ScraperLog para que las corridas
+    automáticas aparezcan en el dashboard.
+
+    Usa sesiones de BD cortas: NO mantiene una conexión abierta durante las
+    horas que dura el scrape. Si se retiene una sesión idle varias horas, el
+    commit final falla con la conexión expirada y el log queda pegado en
+    'running'. Abrimos una sesión para crear el log, la cerramos, corremos el
+    scrape, y abrimos otra sesión fresca para el update final."""
     from backend.database.connection import SessionLocal
     from backend.database.models import ScraperLog
+
     db = SessionLocal()
     log = ScraperLog(fuente=fuente, inicio=datetime.now(timezone.utc), estado="running", cantidad=0)
     db.add(log)
     db.commit()
-    db.refresh(log)
+    log_id = log.id
+    db.close()
+
+    estado, cantidad, error = "ok", 0, None
     try:
-        saved = funcion()
-        log.fin = datetime.now(timezone.utc)
-        log.estado = "ok"
-        log.cantidad = saved or 0
-        db.commit()
-        logger.info(f"{nombre}: {saved} propiedades nuevas.")
+        cantidad = funcion() or 0
+        logger.info(f"{nombre}: {cantidad} propiedades nuevas.")
     except Exception as e:
-        log.fin = datetime.now(timezone.utc)
-        log.estado = "error"
-        log.mensaje_error = str(e)
-        db.commit()
+        estado, error = "error", str(e)
         logger.error(f"{nombre} falló: {e}")
+
+    db = SessionLocal()
+    try:
+        log = db.query(ScraperLog).filter(ScraperLog.id == log_id).first()
+        if log:
+            log.fin = datetime.now(timezone.utc)
+            log.estado = estado
+            log.cantidad = cantidad
+            log.mensaje_error = error
+            db.commit()
     finally:
         db.close()
 

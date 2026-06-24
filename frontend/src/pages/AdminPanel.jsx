@@ -71,6 +71,14 @@ function Btn({ children, onClick, variant = 'primary', disabled, small }) {
 
 // ── Dashboard Tab ─────────────────────────────────────────────────────────────
 
+// Rangos de score por nivel (deben coincidir con NIVELES en scoring/calculator.py)
+const NIVEL_RANGO = {
+  'Muy accesible': 'score ≥ 8.5',
+  'Accesible': '6 ≤ score < 8.5',
+  'Parcialmente accesible': '3.5 ≤ score < 6',
+  'Poco accesible': 'score < 3.5',
+}
+
 function DashboardTab({ token }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -140,10 +148,11 @@ function DashboardTab({ token }) {
               const barColor = nivel === 'Muy accesible' ? 'var(--c-green)' :
                                nivel === 'Accesible' ? '#34C759' :
                                nivel === 'Parcialmente accesible' ? '#FF9500' : '#FF3B30'
+              const rango = NIVEL_RANGO[nivel] || ''
               return (
                 <div key={nivel}>
                   <div className="flex justify-between text-xs mb-1">
-                    <span style={{ color: 'var(--c-text2)' }}>{nivel}</span>
+                    <span style={{ color: 'var(--c-text2)' }}>{nivel} <span style={{ color: 'var(--c-text3)' }}>({rango})</span></span>
                     <span className="tabular-nums font-medium" style={{ color: 'var(--c-text)' }}>
                       {cantidad} ({pct}%)
                     </span>

@@ -62,13 +62,16 @@ async def require_admin(
 def get_dashboard(db: Session = Depends(get_db)):
     from backend.scoring.calculator import NIVELES
 
-    # Stats por fuente
+    # Stats por fuente — excluye duplicados para coincidir con la página pública
     rows = db.query(
         Property.fuente,
         func.count(Property.id).label("total"),
         func.sum(case((Property.analizado == True, 1), else_=0)).label("analizadas"),
         func.avg(Property.score_accesibilidad).label("score_promedio"),
-    ).filter(Property.activa == True).group_by(Property.fuente).all()
+    ).filter(
+        Property.activa == True,
+        Property.duplicate_of == None,
+    ).group_by(Property.fuente).all()
 
     stats_por_fuente = [
         {
@@ -84,6 +87,7 @@ def get_dashboard(db: Session = Depends(get_db)):
     # Distribución de niveles
     scores = db.query(Property.score_accesibilidad).filter(
         Property.activa == True,
+        Property.duplicate_of == None,
         Property.analizado == True,
         Property.score_accesibilidad != None,
     ).all()
@@ -96,10 +100,15 @@ def get_dashboard(db: Session = Depends(get_db)):
 
     distribucion_niveles = [{"nivel": k, "cantidad": v} for k, v in nivel_counts.items()]
 
-    # Totales globales
-    total_activas = db.query(Property).filter(Property.activa == True).count()
+    # Totales globales — excluyen duplicados para coincidir con la página pública
+    total_activas = db.query(Property).filter(
+        Property.activa == True,
+        Property.duplicate_of == None,
+    ).count()
     total_analizadas = db.query(Property).filter(
-        Property.activa == True, Property.analizado == True
+        Property.activa == True,
+        Property.duplicate_of == None,
+        Property.analizado == True,
     ).count()
 
     # Última ejecución por scraper

@@ -189,7 +189,10 @@ def _scrape_operacion(operacion: str, max_paginas: int) -> tuple[int, set[str]]:
                     existing.tipo_operacion = operacion
                     if item.get("precio") and existing.precio != item["precio"]:
                         existing.precio = item["precio"]
-                    if item.get("descripcion") and existing.descripcion != item["descripcion"]:
+                    # Solo actualizar si la nueva descripción es más larga: el
+                    # listado trae apenas el snippet del título, no debe pisar
+                    # una descripción completa traída del detalle.
+                    if item.get("descripcion") and len(item["descripcion"]) > len(existing.descripcion or ""):
                         existing.descripcion = item["descripcion"]
                         existing.analizado = False
                 else:
@@ -201,9 +204,15 @@ def _scrape_operacion(operacion: str, max_paginas: int) -> tuple[int, set[str]]:
                             fotos_detalle = _extraer_fotos_detalle(detail_html)
                             if fotos_detalle:
                                 item["fotos_urls"] = fotos_detalle
-                            # Extraer descripción del detalle
+                            # Extraer descripción del detalle. ZonaProp la pone
+                            # en #longDescription (texto completo); el regex por
+                            # clase anterior matcheaba un bloque chico equivocado
+                            # y dejaba la descripción en el snippet del título.
                             soup_det = BeautifulSoup(detail_html, "html.parser")
-                            desc_el = soup_det.find(class_=re.compile(r"[Dd]escription|[Dd]escripcion|[Dd]etalle"))
+                            desc_el = (
+                                soup_det.find(id="longDescription")
+                                or soup_det.find(id="reactDescription")
+                            )
                             if desc_el:
                                 texto = desc_el.get_text(separator=" ", strip=True)
                                 if len(texto) > len(item.get("descripcion", "")):

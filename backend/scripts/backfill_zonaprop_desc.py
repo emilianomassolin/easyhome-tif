@@ -1,53 +1,62 @@
 """
-Backfill de descripciones de ZonaProp.
+Backfill de descripciones de ZonaProp (versión rápida con curl_cffi).
 
 Las propiedades viejas de ZonaProp tienen como 'descripcion' solo el snippet
-del título (~200 chars) porque el scraper extraía mal la descripción del
-detalle. Este script revisita la página de detalle de cada propiedad ZonaProp
-con descripción corta, trae la descripción completa (#longDescription) y, si es
-más larga, la actualiza y marca la propiedad como no analizada para que el
-próximo análisis la procese con el texto real.
+del título (~200 chars). Este script revisita la página de detalle, trae la
+descripción completa (#longDescription) y, si es más larga, la actualiza y
+marca la propiedad como no analizada para re-análisis posterior.
 
-Solo usa FlareSolverr (no depende de la API de NLP).
+Usa curl_cffi (impersona el fingerprint TLS de Chrome) para pasar Cloudflare
+sin un navegador headless -> ~0.5s por página y alta concurrencia sin thrashing.
 
+Env: DATABASE_URL (prod vía túnel).
 Uso: .venv/bin/python -m backend.scripts.backfill_zonaprop_desc [--workers N] [--min-len N]
 """
 import argparse
 import logging
+import random
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import requests
 from bs4 import BeautifulSoup
+from curl_cffi import requests as creq
+from sqlalchemy import func
 
 from backend.database.connection import SessionLocal
 from backend.database.models import Property
-from backend.scrapers.zonaprop_scraper import _fs_get, FLARESOLVERR_URL
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-_stats = {"ok": 0, "sin_cambio": 0, "error": 0, "total": 0}
+_stats = {"ok": 0, "sin_cambio": 0, "error": 0, "total": 0, "inicio": 0.0}
 _lock = threading.Lock()
+_local = threading.local()
 
 
-def _crear_sesion(session_id: str):
-    try:
-        requests.post(FLARESOLVERR_URL, json={"cmd": "sessions.create", "session": session_id}, timeout=60)
-    except Exception as e:
-        logger.warning(f"No se pudo crear sesión {session_id}: {e}")
+def _session() -> creq.Session:
+    s = getattr(_local, "s", None)
+    if s is None:
+        s = creq.Session(impersonate="chrome", timeout=30)
+        _local.s = s
+    return s
 
 
-def _destruir_sesion(session_id: str):
-    try:
-        requests.post(FLARESOLVERR_URL, json={"cmd": "sessions.destroy", "session": session_id}, timeout=30)
-    except Exception:
-        pass
+def _fetch(url: str, retries: int = 3) -> str | None:
+    for intento in range(retries):
+        try:
+            r = _session().get(url)
+            if r.status_code == 200:
+                return r.text
+            if r.status_code in (403, 429):
+                time.sleep(1.5 * (intento + 1) + random.random())
+        except Exception:
+            time.sleep(1.0 * (intento + 1))
+    return None
 
 
-def _procesar(prop_id: int, permalink: str, session_id: str):
-    html = _fs_get(session_id, permalink)
+def _procesar(prop_id: int, permalink: str):
+    html = _fetch(permalink)
     if not html:
         with _lock:
             _stats["error"] += 1
@@ -85,17 +94,16 @@ def _procesar(prop_id: int, permalink: str, session_id: str):
 
     with _lock:
         hechas = _stats["ok"] + _stats["sin_cambio"] + _stats["error"]
-        if hechas % 50 == 0:
-            logger.info(f"Progreso: {hechas}/{_stats['total']} | actualizadas={_stats['ok']} "
-                        f"sin_cambio={_stats['sin_cambio']} error={_stats['error']}")
-    time.sleep(0.5)
+        if hechas % 200 == 0:
+            elapsed = time.time() - _stats["inicio"]
+            rate = hechas / elapsed if elapsed else 0
+            eta = int((_stats["total"] - hechas) / rate) if rate else 0
+            logger.info(f"{hechas}/{_stats['total']} | ok={_stats['ok']} sin_cambio={_stats['sin_cambio']} "
+                        f"err={_stats['error']} | {rate:.1f}/s | ETA {eta//60}m{eta%60}s")
 
 
-def main(workers: int = 3, min_len: int = 300):
-    from sqlalchemy import func
+def main(workers: int = 25, min_len: int = 300):
     db = SessionLocal()
-    # Solo las que tienen descripción corta (snippet del título); las que ya
-    # tienen descripción completa (scrapeadas con el fix nuevo) se saltean.
     pendientes = db.query(Property.id, Property.permalink_ml).filter(
         Property.fuente == "zonaprop",
         Property.activa == True,
@@ -106,35 +114,25 @@ def main(workers: int = 3, min_len: int = 300):
 
     pendientes = [(pid, url) for pid, url in pendientes]
     _stats["total"] = len(pendientes)
-    logger.info(f"Backfill ZonaProp: {len(pendientes)} propiedades a revisar con {workers} workers.")
+    _stats["inicio"] = time.time()
+    logger.info(f"Backfill ZonaProp (curl_cffi): {len(pendientes)} props | {workers} workers")
 
-    sesiones = [f"zp_bf_w{i}" for i in range(workers)]
-    for s in sesiones:
-        _crear_sesion(s)
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futures = [ex.submit(_procesar, pid, url) for pid, url in pendientes]
+        for f in as_completed(futures):
+            try:
+                f.result()
+            except Exception as e:
+                logger.error(f"Error inesperado: {e}")
 
-    try:
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            futures = [
-                ex.submit(_procesar, pid, url, sesiones[i % workers])
-                for i, (pid, url) in enumerate(pendientes)
-            ]
-            for f in as_completed(futures):
-                try:
-                    f.result()
-                except Exception as e:
-                    logger.error(f"Error inesperado: {e}")
-    finally:
-        for s in sesiones:
-            _destruir_sesion(s)
-
-    logger.info(f"Backfill terminado. actualizadas={_stats['ok']} sin_cambio={_stats['sin_cambio']} "
-                f"error={_stats['error']} de {_stats['total']}.")
+    logger.info(f"Backfill terminado. ok={_stats['ok']} sin_cambio={_stats['sin_cambio']} "
+                f"err={_stats['error']} de {_stats['total']}.")
     return _stats["ok"]
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--workers", type=int, default=3)
-    parser.add_argument("--min-len", type=int, default=300, help="Solo revisar descripciones más cortas que esto")
+    parser.add_argument("--workers", type=int, default=25)
+    parser.add_argument("--min-len", type=int, default=300)
     args = parser.parse_args()
     main(workers=args.workers, min_len=args.min_len)

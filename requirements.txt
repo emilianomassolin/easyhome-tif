@@ -13,3 +13,4 @@ bcrypt==4.0.1
 python-jose[cryptography]
 pydantic[email]
 Pillow>=10.0
+curl_cffi  # backfill rápido de descripciones (bypass Cloudflare por TLS)

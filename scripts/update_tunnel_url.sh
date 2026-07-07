@@ -1,64 +1,45 @@
 #!/usr/bin/env bash
-# Ejecutado por systemd al iniciar la VM.
-# Espera que cloudflared obtenga su URL, la extrae,
-# y actualiza vercel.json en GitHub para que Vercel redeploy automáticamente.
+# Mantiene frontend/vercel.json apuntando a la URL actual del quick-tunnel de
+# cloudflared. El quick-tunnel cambia de URL en cada reinicio de cloudflared,
+# así que esto se ejecuta al bootear Y periódicamente (systemd timer cada 5 min),
+# y actualiza vercel.json vía la API de GitHub solo si la URL cambió.
 #
-# Requiere: GITHUB_TOKEN en /opt/easyhome/.env.tunnel
-# Formato de /opt/easyhome/.env.tunnel:
-#   GITHUB_TOKEN=ghp_xxxxxxxxxxxx
-#   GITHUB_REPO=emilianomassolin/easyhome-tif
-
+# Requiere /opt/easyhome/.env.tunnel con:
+#   GITHUB_TOKEN=ghp_...
+#   GITHUB_REPO=usuario/repo
 set -euo pipefail
 
 ENV_FILE="/opt/easyhome/.env.tunnel"
 LOG="/tmp/update_tunnel_url.log"
+log() { echo "[$(date '+%F %T')] $*" | tee -a "$LOG"; }
 
-log() { echo "[$(date '+%H:%M:%S')] $*" | tee -a "$LOG"; }
+[ -f "$ENV_FILE" ] || { log "ERROR: falta $ENV_FILE"; exit 1; }
+set -a; source "$ENV_FILE"; set +a
 
-if [ ! -f "$ENV_FILE" ]; then
-  log "ERROR: $ENV_FILE no existe. Crealo con GITHUB_TOKEN y GITHUB_REPO."
-  exit 1
-fi
-
-source "$ENV_FILE"
-
-log "Esperando URL de cloudflared..."
+# URL del tunnel: buscar en TODO el journal (la línea aparece una sola vez al
+# arrancar cloudflared; NO limitar con -n, se entierra bajo los logs de reintento).
 TUNNEL_URL=""
-for i in $(seq 1 30); do
-  TUNNEL_URL=$(journalctl -u cloudflared --no-pager -n 500 2>/dev/null \
+for _ in $(seq 1 30); do
+  TUNNEL_URL=$(journalctl -u cloudflared --no-pager 2>/dev/null \
     | grep -oP 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1)
-  if [ -n "$TUNNEL_URL" ]; then
-    break
-  fi
+  [ -n "$TUNNEL_URL" ] && break
   sleep 5
 done
+[ -n "$TUNNEL_URL" ] || { log "ERROR: no se pudo obtener la URL del tunnel"; exit 1; }
 
-if [ -z "$TUNNEL_URL" ]; then
-  log "ERROR: No se pudo obtener la URL del tunnel después de 150s."
-  exit 1
+API="https://api.github.com/repos/$GITHUB_REPO/contents/frontend/vercel.json"
+RESP=$(curl -s -H "Authorization: token $GITHUB_TOKEN" "$API")
+SHA=$(echo "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin)['sha'])")
+CURRENT=$(echo "$RESP" | python3 -c "import sys,json,base64;print(base64.b64decode(json.load(sys.stdin)['content']).decode())")
+
+# Idempotente: si ya apunta a la URL actual, no commitear (el timer corre seguido).
+if echo "$CURRENT" | grep -q "$TUNNEL_URL"; then
+  exit 0
 fi
 
-log "URL del tunnel: $TUNNEL_URL"
-
-# Obtener el archivo actual de GitHub (necesitamos el SHA para actualizarlo)
-RESPONSE=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-  "https://api.github.com/repos/$GITHUB_REPO/contents/frontend/vercel.json")
-
-SHA=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin)['sha'])")
-
-NEW_CONTENT=$(printf '{\n  "rewrites": [\n    { "source": "/(.*)", "destination": "%s/$1" }\n  ]\n}\n' "$TUNNEL_URL")
-ENCODED=$(echo "$NEW_CONTENT" | base64 -w 0)
-
-# Actualizar en GitHub
-UPDATE=$(curl -s -X PUT \
-  -H "Authorization: token $GITHUB_TOKEN" \
-  -H "Content-Type: application/json" \
-  "https://api.github.com/repos/$GITHUB_REPO/contents/frontend/vercel.json" \
-  -d "{\"message\":\"chore: update tunnel URL to $TUNNEL_URL\",\"content\":\"$ENCODED\",\"sha\":\"$SHA\"}")
-
-if echo "$UPDATE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('commit',{}).get('sha',''))" 2>/dev/null | grep -q .; then
-  log "vercel.json actualizado correctamente. Vercel va a redesplegar en ~2 min."
-else
-  log "ERROR actualizando GitHub: $UPDATE"
-  exit 1
-fi
+NEW=$(printf '{\n  "rewrites": [\n    { "source": "/(.*)", "destination": "%s/$1" }\n  ]\n}\n' "$TUNNEL_URL")
+ENC=$(echo "$NEW" | base64 -w0)
+curl -s -X PUT -H "Authorization: token $GITHUB_TOKEN" -H "Content-Type: application/json" "$API" \
+  -d "{\"message\":\"chore: update tunnel URL to $TUNNEL_URL\",\"content\":\"$ENC\",\"sha\":\"$SHA\"}" \
+  | python3 -c "import sys,json;d=json.load(sys.stdin);print('commit',d['commit']['sha'][:12]) if d.get('commit') else sys.exit('fallo: '+str(d)[:200])" \
+  && log "vercel.json actualizado a $TUNNEL_URL"

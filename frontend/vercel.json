@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://respected-princess-brisbane-enhanced.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://internship-dialogue-backing-hardcover.trycloudflare.com/$1" }
   ]
 }

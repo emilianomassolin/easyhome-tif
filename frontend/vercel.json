@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://api.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://get-unable-apartment-henry.trycloudflare.com/$1" }
   ]
 }

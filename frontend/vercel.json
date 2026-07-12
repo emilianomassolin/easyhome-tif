@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://recipes-lunch-modes-rugby.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://agricultural-piano-tcp-deutschland.trycloudflare.com/$1" }
   ]
 }

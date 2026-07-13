@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://call-attending-consulting-student.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://lows-van-alexander-ward.trycloudflare.com/$1" }
   ]
 }

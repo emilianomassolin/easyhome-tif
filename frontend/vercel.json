@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://finally-tray-livestock-cardiac.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://eden-beast-wan-provincial.trycloudflare.com/$1" }
   ]
 }

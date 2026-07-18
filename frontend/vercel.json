@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://relatives-ryan-smart-resolved.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://prizes-certificates-mazda-gore.trycloudflare.com/$1" }
   ]
 }

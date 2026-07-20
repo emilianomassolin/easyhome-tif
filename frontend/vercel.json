@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://outcome-milan-tear-computer.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://reflection-codes-directory-bumper.trycloudflare.com/$1" }
   ]
 }

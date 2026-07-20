@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://studios-centres-playlist-corp.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://blessed-create-belle-generates.trycloudflare.com/$1" }
   ]
 }

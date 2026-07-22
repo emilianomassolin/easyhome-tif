@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://arrow-ace-whilst-boston.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://contest-bingo-weed-diary.trycloudflare.com/$1" }
   ]
 }

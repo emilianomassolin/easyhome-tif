@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://yard-navigation-extension-determines.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://calendars-strange-relevance-accidents.trycloudflare.com/$1" }
   ]
 }

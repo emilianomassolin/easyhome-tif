@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://viewpicture-conf-memorabilia-select.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://sequence-hearing-arcade-command.trycloudflare.com/$1" }
   ]
 }

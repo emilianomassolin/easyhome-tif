@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://zoning-joke-wrestling-barely.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://travels-feel-situation-revolutionary.trycloudflare.com/$1" }
   ]
 }

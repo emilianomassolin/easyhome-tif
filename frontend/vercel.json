@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://api.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://concert-residence-tip-hiring.trycloudflare.com/$1" }
   ]
 }

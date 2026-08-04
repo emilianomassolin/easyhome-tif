@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://whatever-gonna-loop-parliamentary.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://genuine-univ-adjusted-bearing.trycloudflare.com/$1" }
   ]
 }

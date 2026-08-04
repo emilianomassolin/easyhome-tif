@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://behalf-dual-dispatch-regime.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://satisfaction-hrs-roller-considered.trycloudflare.com/$1" }
   ]
 }

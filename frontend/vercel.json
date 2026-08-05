@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://satisfaction-hrs-roller-considered.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://api.trycloudflare.com/$1" }
   ]
 }

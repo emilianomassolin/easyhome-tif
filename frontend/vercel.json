@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://consequences-engineers-axis-database.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://api.trycloudflare.com/$1" }
   ]
 }

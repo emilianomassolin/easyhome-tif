@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://experts-exercise-spirituality-collapse.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://api.trycloudflare.com/$1" }
   ]
 }

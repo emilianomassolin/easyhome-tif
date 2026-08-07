@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://api.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://electro-clubs-olympics-fantasy.trycloudflare.com/$1" }
   ]
 }

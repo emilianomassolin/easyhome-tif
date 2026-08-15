@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://wells-invest-collected-lead.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://normal-critics-closing-bicycle.trycloudflare.com/$1" }
   ]
 }

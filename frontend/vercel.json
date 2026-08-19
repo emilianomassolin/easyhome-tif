@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://normal-critics-closing-bicycle.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://jenny-determines-nature-holders.trycloudflare.com/$1" }
   ]
 }

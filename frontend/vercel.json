@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://jenny-determines-nature-holders.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://keyboard-diffs-mins-karaoke.trycloudflare.com/$1" }
   ]
 }

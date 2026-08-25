@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://keyboard-diffs-mins-karaoke.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://encryption-progressive-expect-territory.trycloudflare.com/$1" }
   ]
 }

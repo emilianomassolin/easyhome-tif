@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://encryption-progressive-expect-territory.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://requirements-principle-likely-seen.trycloudflare.com/$1" }
   ]
 }

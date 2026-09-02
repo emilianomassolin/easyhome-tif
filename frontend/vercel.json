@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://streets-passion-nirvana-mozilla.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://institute-eagle-astronomy-caroline.trycloudflare.com/$1" }
   ]
 }

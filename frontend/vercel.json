@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://strictly-res-delivered-luck.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://considering-opening-jerusalem-lawrence.trycloudflare.com/$1" }
   ]
 }

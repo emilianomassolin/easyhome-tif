@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://unified-sierra-yields-concerts.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://sunny-den-occurs-striking.trycloudflare.com/$1" }
   ]
 }

@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://processed-strings-cabinets-gis.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://ipaq-budapest-mill-operating.trycloudflare.com/$1" }
   ]
 }

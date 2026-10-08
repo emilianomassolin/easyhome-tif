@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://remind-wedding-chicken-relates.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://tournament-levitra-showcase-material.trycloudflare.com/$1" }
   ]
 }

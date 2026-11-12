@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://eyed-tracks-residence-brad.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://ala-ebony-delight-refine.trycloudflare.com/$1" }
   ]
 }

@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://ala-ebony-delight-refine.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://supervisors-kevin-setting-climate.trycloudflare.com/$1" }
   ]
 }

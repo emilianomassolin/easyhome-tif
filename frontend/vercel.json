@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://supervisors-kevin-setting-climate.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://tea-pie-neutral-pharmacy.trycloudflare.com/$1" }
   ]
 }

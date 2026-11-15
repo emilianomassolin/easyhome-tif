@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://tea-pie-neutral-pharmacy.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://gbp-advertisers-mirrors-secretary.trycloudflare.com/$1" }
   ]
 }

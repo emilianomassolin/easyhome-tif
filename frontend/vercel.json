@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://spectrum-hosts-charms-merely.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://creator-browsing-andrea-numeric.trycloudflare.com/$1" }
   ]
 }

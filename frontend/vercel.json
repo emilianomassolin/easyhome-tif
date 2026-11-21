@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://prepaid-passing-albuquerque-reveal.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://varies-wiki-petersburg-assembled.trycloudflare.com/$1" }
   ]
 }

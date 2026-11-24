@@ -1,5 +1,5 @@
 {
   "rewrites": [
-    { "source": "/(.*)", "destination": "https://varies-wiki-petersburg-assembled.trycloudflare.com/$1" }
+    { "source": "/(.*)", "destination": "https://arabic-rank-membrane-gear.trycloudflare.com/$1" }
   ]
 }
